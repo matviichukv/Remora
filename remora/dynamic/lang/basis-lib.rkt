@@ -302,10 +302,12 @@
 
 
 (define-primop (R_reverse [arr all])
-  (define length (vector-ref (rem-array-shape arr) 0))
-  (cell-list->array (reverse (array->cell-list arr -1))
-                    (vector length)
-                    (vector-drop (rem-array-shape arr) 1)))
+  (if (zero? (vector-length (rem-array-shape arr)))
+      arr
+      (let ([length (vector-ref (rem-array-shape arr) 0)])
+           (cell-list->array (reverse (array->cell-list arr -1))
+                             (vector length)
+                             (vector-drop (rem-array-shape arr) 1)))))
 (module+ test
   (check-equal?
    (remora ((rerank (1) R_reverse)
@@ -818,6 +820,21 @@
                                           (array 6 6 6 0))))
                 (remora (R_box (array (array 1 2 3 0)
                                     (array 6 6 6 0))))))
+
+(define-primop (R_index [arr all] [idx 1])
+  (if (not (eq? (vector-length (rem-array-data idx)) (vector-length (rem-array-shape arr)))) 
+      (error "invalid index given, index: " idx ", shape of the array" (rem-array-shape arr)) 
+      #f)
+  (define shape (R_shape-of arr))
+  (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_behead (R_reverse shape))))))
+  
+  (define index-of-elem (remora (R_reduce + 0 (* index-coef-vector idx))))
+  (define res (vector-ref (rem-array-data arr) (vector-ref (rem-array-data index-of-elem) 0)))
+  (scalar res))
+#;
+(module+ test
+  (check-equal? (remora (R_index (R_iota (array 3 4 5)) (array 1 2 4)))
+                (remora 34)))
 
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
