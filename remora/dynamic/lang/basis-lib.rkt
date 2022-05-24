@@ -822,19 +822,43 @@
                                     (array 6 6 6 0))))))
 
 (define-primop (R_index [arr all] [idx 1])
-  (if (not (eq? (vector-length (rem-array-data idx)) (vector-length (rem-array-shape arr)))) 
-      (error "invalid index given, index: " idx ", shape of the array" (rem-array-shape arr)) 
+  ; check if the idx has correct number of elements
+  (define shape-vec (rem-array-shape arr))
+  (define idx-vec (rem-array-data idx))
+  (if (>= (vector-length idx-vec) (vector-length shape-vec))
+      (error "invalid index given, index: " idx ", shape of the array: " shape-vec)
       #f)
-  (define shape (R_shape-of arr))
-  (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_behead (R_reverse shape))))))
-  
+  ; check if any index is out of bounds
+  (if (not (zero? (vector-count (lambda (dim i) (>= i dim)) (vector-take shape-vec (vector-length idx-vec)) idx-vec)))
+      (error "One of the indices is out of bounds, index: " idx ", shape of array: " shape-vec)
+      #f)
+  (if (not (zero? (vector-count negative? idx-vec)))
+      (error "One of the indices is negative, index: " idx)
+      #f)
+
+  (define split-at-idx (vector-length idx-vec))
+  (define index-shape (remora (R_take split-at-idx (R_shape-of arr))))
+  (define res-shape (vector-drop shape-vec split-at-idx))
+
+  (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_reverse (R_behead index-shape))))))
+  (define res-size (foldr * 1 (vector->list res-shape)))
   (define index-of-elem (remora (R_reduce + 0 (* index-coef-vector idx))))
-  (define res (vector-ref (rem-array-data arr) (vector-ref (rem-array-data index-of-elem) 0)))
-  (scalar res))
+  (println index-coef-vector)
+  (println res-size)
+  (println index-of-elem)
+  (define res (vector-take (vector-drop (rem-array-data arr) (sub1 (vector-ref (rem-array-data index-of-elem) 0)))
+                           res-size))
+  (rem-array res-shape res))
 #;
 (module+ test
   (check-equal? (remora (R_index (R_iota (array 3 4 5)) (array 1 2 4)))
-                (remora 34)))
+                (remora 34))
+  (check-equal? (remora (R_index (R_iota (array 10)) (array 8)))
+                (remora 8))
+  (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array )))))
+  (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array 2 3)))))
+  (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array -1)))))
+  (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array 3))))))
 
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
