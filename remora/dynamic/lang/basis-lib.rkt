@@ -697,6 +697,9 @@
    (vector
     (Rλ ([arr all]) (rem-array #() (vector (print arr)))))))
 
+(define-primop (R_build-array (f 0) (shape 1))
+  (remora (f (R_iota shape))))
+
 ;;; read a whole array structure
 (define-primop (R_read [port 0])
   (list->array (read (vector-ref (rem-array-data port) 0))))
@@ -825,8 +828,8 @@
   ; check if the idx has correct number of elements
   (define shape-vec (rem-array-shape arr))
   (define idx-vec (rem-array-data idx))
-  (if (>= (vector-length idx-vec) (vector-length shape-vec))
-      (error "invalid index given, index: " idx ", shape of the array: " shape-vec)
+  (if (> (vector-length idx-vec) (vector-length shape-vec))
+      (error "invalid index given, index: " idx-vec ", shape of the array: " shape-vec)
       #f)
   ; check if any index is out of bounds
   (if (not (zero? (vector-count (lambda (dim i) (>= i dim)) (vector-take shape-vec (vector-length idx-vec)) idx-vec)))
@@ -843,10 +846,7 @@
   (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_reverse (R_behead index-shape))))))
   (define res-size (foldr * 1 (vector->list res-shape)))
   (define index-of-elem (remora (R_reduce + 0 (* index-coef-vector idx))))
-  (println index-coef-vector)
-  (println res-size)
-  (println index-of-elem)
-  (define res (vector-take (vector-drop (rem-array-data arr) (sub1 (vector-ref (rem-array-data index-of-elem) 0)))
+  (define res (vector-take (vector-drop (rem-array-data arr) (vector-ref (rem-array-data index-of-elem) 0))
                            res-size))
   (rem-array res-shape res))
 #;
