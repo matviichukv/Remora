@@ -121,6 +121,9 @@
      ((remora-macro-transformer (syntax-local-value #'head))
       #'(head tail ...))]
     ;; if not, this is function application
+    [(_ (head (~once (~seq #:result-shape res-shape)) ... tail ...))
+     ((remora-macro-transformer (syntax-local-value #'apply/shape))
+      #'(apply/shape res-shape head tail ...))]
     [(_ (head tail ...))
      ((remora-macro-transformer (syntax-local-value #'apply))
       #'(apply head tail ...))]

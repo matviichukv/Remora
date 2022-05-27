@@ -1,5 +1,14 @@
 #lang remora/dynamic
 
+(def (println (a all))
+  (show a)
+  (display "\n"))
+
+(def (forall (a 1) (f 0))
+  (define shape (shape-of a))
+  (println shape)
+  (reduce and #t (f a)))
+
 (def (dot-product (a 1) (b 1))
   (reduce + 0 (* a b)))
 
@@ -39,5 +48,19 @@
 (symmetric? (identity-mat 5))
 
 
+(def (find-lower-bound (A 2))
+  (define shape (shape-of A))
+  (define row-len (index shape [1]))
+  (define col-len (index shape [0]))
+  (define p-vals (iota [col-len]))
+  (println p-vals)
+  (def (col-lower-bounded? (col 1) (j 0) (p 0))
+    (define rest (drop (+ j p) col))
+    (println j)
+    (forall rest (fn ((n 0)) (equal n 0))))
+  (def (lower-bound? (p 0))
+    (col-lower-bounded? (transpose A) row-len p))
+  (define valid-p-vals (filter* (lower-bound? p-vals) p-vals))
+  (min valid-p-vals))
 
-
+(find-lower-bound (identity-mat 4))
