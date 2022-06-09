@@ -396,6 +396,7 @@
             (remora-apply op left right))
           init
           input-items))
+  ; TODO: does this ever exec into the true branch
   (if (empty? result-items)
       (cell-list->array
        result-items
@@ -418,6 +419,18 @@
                                   (array 3 4))))
                 (remora (array (array 0 1 3)
                                (array 0 3 7)))))
+
+(define (scan-weird op init xs)
+  (cons init
+        (for/fold ([acc (list)])
+                  ([elt xs])
+          (cons (op (if (empty? acc) init (car acc)) elt) acc))))
+
+(define-primop (R_scan-weird [op all] [init all] [xs all])
+  (define input-items (array->cell-list xs -1))
+  (define res-items (scan-weird (lambda (left right) (remora-apply op left right))
+                                init input-items))
+  (cell-list->array res-items (vector (length res-items))))
 
 
 ;;; Interpret a digit list in a given radix
@@ -849,7 +862,7 @@
   (define res (vector-take (vector-drop (rem-array-data arr) (vector-ref (rem-array-data index-of-elem) 0))
                            res-size))
   (rem-array res-shape res))
-#;
+
 (module+ test
   (check-equal? (remora (R_index (R_iota (array 3 4 5)) (array 1 2 4)))
                 (remora 34))
@@ -859,6 +872,28 @@
   (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array 2 3)))))
   (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array -1)))))
   (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array 3))))))
+
+
+
+(define-primop (R_array-set [arr all] [idx 1] [new-val all])
+  (define shape-vec (rem-array-shape arr))
+  (define idx-vec (rem-array-data idx))
+  (when (> (vector-length idx-vec) (vector-length shape-vec))
+    (error "Wrong index"))
+  (define new-val-shape (rem-array-shape new-val))
+  (define split-at-idx (vector-length idx-vec))
+  (unless (equal? (vector-drop shape-vec split-at-idx) new-val-shape)
+    (error "New value wrong shape"))
+  (define arr-data (rem-array-data arr))
+  (define new-val-data (rem-array-data new-val))
+  ; calc the 'flat' index in the result arr
+  (define index-shape (remora (R_take split-at-idx (R_shape-of arr))))
+  (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_reverse (R_behead index-shape))))))
+  (define index-of-elem-remora (remora (R_reduce + 0 (* index-coef-vector idx))))
+  (define index-of-elem (vector-ref (rem-array-data index-of-elem-remora) 0))
+  (vector-copy! arr-data index-of-elem new-val-data)
+  (rem-array shape-vec arr-data))
+
 
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
