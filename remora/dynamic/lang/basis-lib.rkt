@@ -433,6 +433,35 @@
   (cell-list->array res-items (vector (length res-items))))
 
 
+(define (iscan op xs)
+  (define xs-len (length xs))
+  (if (equal? xs-len 0)
+      xs
+      (reverse
+       (for/fold ([acc (list (car xs))])
+                 ([elt (cdr xs)])
+         (cons (op (car acc) elt) acc)))))
+
+(define-primop (R_iscan [op all] [xs all])
+  (define input-items (array->cell-list xs -1))
+  (define res-items (iscan (λ (left right) (remora-apply op left right)) input-items))
+  (cell-list->array res-items (vector (length res-items))))
+
+(define (iscan/init op init xs)
+  (reverse
+   (for/fold ([acc (list)])
+             ([elt xs])
+     (cons (op (if (empty? acc) init (car acc)) elt) acc))))
+
+
+; TODO: op should also be able to accept 1 argument?
+(define-primop (R_iscan/init [op all] [init all] [xs all])
+  (define input-items (array->cell-list xs -1))
+  (define res-items (iscan/init (λ (left right) (remora-apply op left right))
+                           init input-items))
+  (cell-list->array res-items (vector (length res-items))))
+
+
 ;;; Interpret a digit list in a given radix
 (define (base radix digits)
   ;; if radix is too short, extend by copying its first element

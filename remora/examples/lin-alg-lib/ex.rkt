@@ -125,7 +125,7 @@
   (def col-len (index (shape-of A) [0]))
   (def row-len (index (shape-of A) [1])) 
   1)
-
+#|
 (def (parallel-add (a 1) (b 1) (base 0))
   (def (add-with-carry (prev 0) (cur 0))
     (+ cur (quotient prev base)))
@@ -144,5 +144,39 @@
 
 (hacky-parallel-add [7 8 9] [4 5 6] 10)
 (hacky-parallel-add [9] [6] 10)
+
+(def (parallel-add-v2 (a 1) (b 1) (base 0))
+  (def (add-with-carry (prev 0) (cur 0))
+    (+ cur (quotient prev base)))
+  (define res-with-carry (reverse (iscan add-with-carry (reverse (+ a b)))))
+  (modulo (append [(quotient (head res-with-carry) base)] res-with-carry) base))
+
+(parallel-add-v2 [7 8 9] [4 5 6] 10)
+|#
+
+(def (parallel-add-v3 (a 1) (b 1) (base 0))
+  (def (cool-add (l 0) (r 0))
+    (define res (+ l r))
+    (list (quotient res base) (modulo res base)))
+  (def (add-with-carry (left 0) (cur 0))
+    (define res (+ (car left) (+ (cadr cur) (* base (car cur)))))
+    (list (quotient res base) (modulo res base)))
+  (define res-with-carry (iscan add-with-carry (cool-add a b)))
+  (append (cadr res-with-carry) (array (tail (car res-with-carry)))))
+
+
+(parallel-add-v3 [7 8 9] [4 5 6] 10)
+(parallel-add-v3 [7 9 9] [2 0 6] 10)
+
+#;
+(def (parallel-add-cute (a 1) (b 1) (base 0))
+  (def (cool-add (l 0) (r 0))
+    (define res (+ l r))
+    (list (quotient res base) res))
+  (def (add-with-carry (left 0) (cur 0))
+    (define res (+ (car left) (cadr cur)))
+    (list (quotient res base) (modulo res base)))
+  (define-values (res final-sum) (iscan+final add-with-carry (cool-add a b)))
+  (values res (cadr final-sum)))
 
  
