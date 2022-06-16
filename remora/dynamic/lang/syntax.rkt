@@ -23,6 +23,7 @@
          vec
          rerank
          def
+         def-values
          defstruct
          record
          record-literal
@@ -257,6 +258,17 @@
      #'(remora (def funname (fn ((var rank) ...) body ...)))]
     [(_ name:id defn-or-expr )
      #'(define name (remora defn-or-expr) )]))
+
+
+;;; (def-values (name ...) expr)
+;;; define-values for Remora
+(define-remora-syntax (def-values stx)
+  (syntax-parse stx
+    [(_ (name:id ...) expr)
+     #`(define-values (name ...) (unsyntax (datum->syntax #f (cons 'values (call-with-values (lambda () expr) list)))))
+      (quasisyntax (define-values (name ...)
+         (unsyntax (let ((foo (datum->syntax #f (cons 'values (map (lambda (e) #'(remora e)) (call-with-values (lambda () expr) list))))))
+                     foo))))]))
 
 ;;; (struct name (field ...+))
 (define-remora-syntax (defstruct stx)

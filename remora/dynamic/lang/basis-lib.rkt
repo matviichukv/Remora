@@ -419,20 +419,29 @@
                                   (array 3 4))))
                 (remora (array (array 0 1 3)
                                (array 0 3 7)))))
+#|
+#;(define (scan/zero op z all))
+(define-primop (R_scan/zero [op all] [z all] [xs all])
+  (R_scan op z xs))
+(module+ test)
 
-(define (scan-weird op init xs)
-  (cons init
-        (for/fold ([acc (list)])
-                  ([elt xs])
-          (cons (op (if (empty? acc) init (car acc)) elt) acc))))
+(define (open-scan/init op init xs)
+  )
+(define-primop (R_open-scan/init))
+(module+ test)
 
-(define-primop (R_scan-weird [op all] [init all] [xs all])
-  (define input-items (array->cell-list xs -1))
-  (define res-items (scan-weird (lambda (left right) (remora-apply op left right))
-                                init input-items))
-  (cell-list->array res-items (vector (length res-items))))
+(define (open-scan/zero))
+(define-primop (R_open-scan/zero))
+(module+ test)
 
+(define (scan+final/init))
+(define-primop (R_scan+final/init))
+(module+ test)
 
+(define (scan+final/zero))
+(define-primop (R_scan+final/zero))
+(module+ test)
+|#
 (define (iscan op xs)
   (define xs-len (length xs))
   (if (equal? xs-len 0)
@@ -447,6 +456,12 @@
   (define res-items (iscan (λ (left right) (remora-apply op left right)) input-items))
   (cell-list->array res-items (vector (length res-items))))
 
+(module+ test
+  (check-equal? (remora (R_iscan + (array 1 2 3 4)))
+                (remora (array 1 3 6 10)))
+  (check-equal? (remora (R_iscan + (array (array 1 2) (array 3 4))))
+                (remora (array (array 1 2) (array 4 6)))))
+
 (define (iscan/init op init xs)
   (reverse
    (for/fold ([acc (list)])
@@ -460,6 +475,19 @@
   (define res-items (iscan/init (λ (left right) (remora-apply op left right))
                            init input-items))
   (cell-list->array res-items (vector (length res-items))))
+
+(module+ test
+  (check-equal? (remora (R_iscan/init + 1 (array 1 2 3 4)))
+                (remora (array 2 4 7 11)))
+  (check-equal? (remora (R_iscan/init + (array 0 1)
+                                      (array (array 1 2)
+                                             (array 3 4)
+                                             (array 5 6))))
+                (remora (array (array 1 3)
+                               (array 4 7)
+                               (array 9 13)))))
+
+
 
 
 ;;; Interpret a digit list in a given radix

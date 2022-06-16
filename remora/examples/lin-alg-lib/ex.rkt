@@ -170,13 +170,13 @@
 
 #;
 (def (parallel-add-cute (a 1) (b 1) (base 0))
-  (def (cool-add (l 0) (r 0))
-    (define res (+ l r))
-    (list (quotient res base) res))
   (def (add-with-carry (left 0) (cur 0))
-    (define res (+ (car left) (cadr cur)))
-    (list (quotient res base) (modulo res base)))
-  (define-values (res final-sum) (iscan+final add-with-carry (cool-add a b)))
-  (values res (cadr final-sum)))
+    (+ (quotient left base) cur))
+  (define-values (res final-sum) (iscan+final add-with-carry (+ a b)))
+  (values res (quotient final-sum base)))
+#;
+(parallel-add-cute [7 8 9] [4 5 6] 10)
+#;
+(parallel-add-cute [7 9 9] [2 0 6] 10)
 
  
