@@ -8,6 +8,7 @@
          racket/contract
          racket/sequence
          racket/provide
+         (only-in racket/base [values racket-values])
          (for-syntax racket/base))
 (module+ test
   (require rackunit))
@@ -434,14 +435,41 @@
 (define-primop (R_open-scan/zero))
 (module+ test)
 
-(define (scan+final/init))
-(define-primop (R_scan+final/init))
-(module+ test)
 
 (define (scan+final/zero))
 (define-primop (R_scan+final/zero))
 (module+ test)
 |#
+
+
+(define (scan+final/init op init xs)
+  (define rev-res (for/fold ([acc (list init)])
+                            ([elt xs])
+                    (cons (op (first acc) elt) acc)))
+  (printf "scan+final/init res: ~v\n" rev-res)
+  (racket-values (reverse rev-res) (car rev-res)))
+
+(define-primop (R_scan+final/init [op all] [init all] [xs all])
+  (define input-items (array->cell-list xs -1))
+  (define-values (result-items final-res) (scan+final/init (λ (left right) (remora-apply op left right))
+                                        init
+                                        input-items))
+  (cell-list->array result-items (vector (length result-items))))
+(module+ test)
+
+
+(define (iscan+final/init op init xs)
+  (define-values (res final) (scan+final/init op init xs))
+  (racket-values (cdr res) final))
+(define-primop (R_iscan+final/init [op all] [init all] [xs all])
+  (define input-items (array->cell-list xs -1))
+  (define-values (result-items final-res) (iscan+final/init (λ (left right) (remora-apply op left right))
+                                                     init
+                                                     input-items))
+  (printf "items: ~v  \nfinal: ~v\n" result-items final-res)
+  (racket-values (cell-list->array result-items (vector (length result-items))) final-res))
+
+
 (define (iscan op xs)
   (define xs-len (length xs))
   (if (equal? xs-len 0)

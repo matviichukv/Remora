@@ -7,7 +7,7 @@
 (def (forall (a 1) (f 0))
   (define shape (shape-of a))
   (reduce and #t (f #:result-shape shape a)))
-
+#|
 (def (dot-product (a 1) (b 1))
   (reduce + 0 (* a b)))
 
@@ -125,35 +125,8 @@
   (def col-len (index (shape-of A) [0]))
   (def row-len (index (shape-of A) [1])) 
   1)
-#|
-(def (parallel-add (a 1) (b 1) (base 0))
-  (def (add-with-carry (prev 0) (cur 0))
-    (+ cur (quotient prev base)))
-  (define res-with-carry (reverse (behead (scan add-with-carry 0 (reverse (+ a b))))))
-  (modulo (append [(quotient (head res-with-carry) base)] res-with-carry) base))
-
-(parallel-add [7 8 9] [4 5 6] 10)
-
-(def (hacky-parallel-add (a 1) (b 1) (base 0))
-  (def (add-with-carry (prev 0) (cur 0))
-    (+ cur (quotient prev base)))
-  (define res-with-carry (scan-weird add-with-carry 0 (reverse (+ a b))))
-  (define head-element (quotient (index res-with-carry [1]) base))
-  (modulo (array-set res-with-carry [0] head-element) base))
-  
-
-(hacky-parallel-add [7 8 9] [4 5 6] 10)
-(hacky-parallel-add [9] [6] 10)
-
-(def (parallel-add-v2 (a 1) (b 1) (base 0))
-  (def (add-with-carry (prev 0) (cur 0))
-    (+ cur (quotient prev base)))
-  (define res-with-carry (reverse (iscan add-with-carry (reverse (+ a b)))))
-  (modulo (append [(quotient (head res-with-carry) base)] res-with-carry) base))
-
-(parallel-add-v2 [7 8 9] [4 5 6] 10)
 |#
-
+#|
 (def (parallel-add-v3 (a 1) (b 1) (base 0))
   (def (cool-add (l 0) (r 0))
     (define res (+ l r))
@@ -164,18 +137,18 @@
   (define res-with-carry (iscan add-with-carry (cool-add a b)))
   (append (cadr res-with-carry) (array (tail (car res-with-carry)))))
 
-
 (parallel-add-v3 [7 8 9] [4 5 6] 10)
 (parallel-add-v3 [7 9 9] [2 0 6] 10)
+|#
 
-#;
+(debug-mode #t)
 (def (parallel-add-cute (a 1) (b 1) (base 0))
   (def (add-with-carry (left 0) (cur 0))
     (+ (quotient left base) cur))
-  (define-values (res final-sum) (iscan+final add-with-carry (+ a b)))
-  (values res (quotient final-sum base)))
-#;
-(parallel-add-cute [7 8 9] [4 5 6] 10)
+  (def-values (res final-sum) (iscan+final/init add-with-carry 0 (+ a b)))
+  1)
+
+(parallel-add-cute [7] [4] 10)
 #;
 (parallel-add-cute [7 9 9] [2 0 6] 10)
 

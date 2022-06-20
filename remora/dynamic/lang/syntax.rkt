@@ -3,10 +3,10 @@
 (require "records.rkt"
          "semantics.rkt"
          syntax/parse
-         (rename-in racket/base [apply racket-apply])
+         (rename-in racket/base [apply racket-apply] [values racket-values])
          (for-syntax syntax/parse
                      (except-in racket/base apply unbox)
-                     (rename-in racket/base [apply racket-apply])
+                     (rename-in racket/base [apply racket-apply] [values racket-values])
                      racket/list
                      racket/syntax))
 
@@ -24,6 +24,7 @@
          rerank
          def
          def-values
+         values
          defstruct
          record
          record-literal
@@ -260,15 +261,16 @@
      #'(define name (remora defn-or-expr) )]))
 
 
+(define-remora-syntax (values stx)
+  (syntax-parse stx
+    [(_ expr ...) #'(racket-values (remora expr) ...)]))
+
 ;;; (def-values (name ...) expr)
 ;;; define-values for Remora
 (define-remora-syntax (def-values stx)
   (syntax-parse stx
     [(_ (name:id ...) expr)
-     #`(define-values (name ...) (unsyntax (datum->syntax #f (cons 'values (call-with-values (lambda () expr) list)))))
-      (quasisyntax (define-values (name ...)
-         (unsyntax (let ((foo (datum->syntax #f (cons 'values (map (lambda (e) #'(remora e)) (call-with-values (lambda () expr) list))))))
-                     foo))))]))
+     #'(define-values (name ...) (remora expr))]))
 
 ;;; (struct name (field ...+))
 (define-remora-syntax (defstruct stx)

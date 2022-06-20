@@ -128,8 +128,7 @@
                 (vector-ref (rem-array-data fun)
                             function-cell-id))
         (printf " arg cells: ~v\n" arg-cells))
-      (apply (vector-ref (rem-array-data fun) function-cell-id)
-             arg-cells)))
+      (call-with-values (lambda () (apply (vector-ref (rem-array-data fun) function-cell-id) arg-cells)) list)))
   (when (debug-mode) (printf "result-cells = ~v\n" result-cells))
   
   (when (debug-mode)
@@ -147,9 +146,13 @@
       ;; TODO: should maybe check for mismatch between annotated and actual
       ;;       (i.e. frame-shape ++ cell-shape) result shapes
       [(equal? 0 (vector-length result-cells)) result-shape]
-      [(for/and ([c result-cells])
+      [(equal? 1 (vector-length result-cells)) (vector 1)]
+      [(for/or ([c-list result-cells])
+         (> (length c-list) 1))
+       (error "Function returned multiple values and result shape is not 1, aborting")]
+      [(for/and ([c-list result-cells])
          (equal? (rem-array-shape (vector-ref result-cells 0))
-                 (rem-array-shape c)))
+                 (rem-array-shape (car c-list))))
        (when (debug-mode)
          (printf "using cell shape ~v\n"
                  (rem-array-shape (vector-ref result-cells 0))))
@@ -157,18 +160,37 @@
                       (rem-array-shape (vector-ref result-cells 0)))]
       [else (error "Result cells have mismatched shapes: ~v" result-cells)]))
   (when (debug-mode) (printf "final-shape = ~v\n" final-shape))
-  
+
+
+
+  (cond [(and (equal? 1 (vector-length result-cells))
+           (> (length (vector-ref result-cells 0)) 1))
+      (apply values (map (lambda (cell-val) (rem-array final-shape cell-val)) (vector-ref result-cells 0)))]
+      [else (begin
+
+        ;; determine final result data: all result cells' data vectors concatenated
+        (define final-data
+          (apply vector-append
+                 (for/list ([r-list result-cells])
+                   (rem-array-data (car r-list)))))
+          (when (debug-mode)
+            (printf "final-data = ~v\n" final-data)
+            (printf "(equal? #() final-shape) = ~v\n"
+                    (equal? #() final-shape)))
+          (rem-array final-shape final-data))]))
+
+  #|
   ;; determine final result data: all result cells' data vectors concatenated
   (define final-data
     (apply vector-append
-           (for/list ([r result-cells])
-                     (rem-array-data r))))
+           (for/list ([r-list result-cells])
+                     (rem-array-data (car r))))
   (when (debug-mode)
     (printf "final-data = ~v\n" final-data)
     (printf "(equal? #() final-shape) = ~v\n"
             (equal? #() final-shape)))
   (rem-array final-shape final-data))
-
+|#
 ;;; Contract constructor for vectors of specified length
 (define ((vector-length/c elts len) vec)
   (and ((vectorof elts #:flat? #t) vec)
@@ -604,3 +626,7 @@
                           val]
         [else (when (debug-mode) (printf "  wrapping\n"))
               (rem-array #() (vector val))]))
+
+(provide racket-mult->remora)
+(define racket-mult->remora (lambda xs
+                              (apply values (map racket->remora xs))))
