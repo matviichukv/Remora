@@ -141,15 +141,19 @@
 (parallel-add-v3 [7 9 9] [2 0 6] 10)
 |#
 
-(debug-mode #t)
+
+
+
+(debug-mode #f)
+
 (def (parallel-add-cute (a 1) (b 1) (base 0))
   (def (add-with-carry (left 0) (cur 0))
     (+ (quotient left base) cur))
   (def-values (res final-sum) (iscan+final/init add-with-carry 0 (+ a b)))
-  1)
-
-(parallel-add-cute [7] [4] 10)
+  (values (modulo res base) (quotient final-sum base)))
 #;
+(def-values (foo bar) (parallel-add-cute [7 8 1] [4 9 6] 10))
+
 (parallel-add-cute [7 9 9] [2 0 6] 10)
 
  

@@ -15,7 +15,9 @@
 ;;;-------------------------------------
 
 ;;; Apply a Remora array (in Remora, an array may appear in function position)
-(provide
+
+(provide apply-rem-array)
+#;(provide
  (contract-out
   (apply-rem-array (->* (rem-array?)
                         (#:result-shape
@@ -134,8 +136,18 @@
   (when (debug-mode)
     (printf "# of result cells: ~v\nresult-shape = ~v\n"
             (vector-length result-cells) result-shape))
+  (define num-of-values (length (vector-ref result-cells 0)))
+  (when (debug-mode) (printf "Number of values returned: ~v\n" num-of-values))
+
+  ;; determine final results shape per value
+
+  (define result-by-value (map (λ (val-id) (vector-map (λ (c) (list-ref c val-id)) result-cells))
+                               (build-list num-of-values (λ (x) x))))
+  (when (debug-mode) (printf "Results grouped by value (for multiple return values purpose): ~v\n" result-by-value))
+
   ;; determine final result shape
-  (define final-shape
+  (define (final-shape val-id result-cells)
+    (when (debug-mode) (printf "Determining final shape for ~v, len: ~v\n" result-cells (vector-length result-cells)))
     (cond
       ;; empty frame and no shape annotation -> error
       [(and (equal? result-shape 'no-annotation)
@@ -145,24 +157,37 @@
       ;; empty frame -> use annotated shape
       ;; TODO: should maybe check for mismatch between annotated and actual
       ;;       (i.e. frame-shape ++ cell-shape) result shapes
+      #;[(void? (vector-ref ))]
       [(equal? 0 (vector-length result-cells)) result-shape]
-      [(equal? 1 (vector-length result-cells)) (vector 1)]
-      [(for/or ([c-list result-cells])
-         (> (length c-list) 1))
-       (error "Function returned multiple values and result shape is not 1, aborting")]
-      [(for/and ([c-list result-cells])
+      ;[(equal? 1 (vector-length result-cells)) (vector)]
+      [(for/and ([c result-cells])
          (equal? (rem-array-shape (vector-ref result-cells 0))
-                 (rem-array-shape (car c-list))))
+                 (rem-array-shape c)))
+
+         #;
+         (equal? (rem-array-shape (car (vector-ref result-cells 0)))
+                 (rem-array-shape (car c-list)))
        (when (debug-mode)
          (printf "using cell shape ~v\n"
                  (rem-array-shape (vector-ref result-cells 0))))
        (vector-append principal-frame
                       (rem-array-shape (vector-ref result-cells 0)))]
       [else (error "Result cells have mismatched shapes: ~v" result-cells)]))
-  (when (debug-mode) (printf "final-shape = ~v\n" final-shape))
+
+  (define final-shape-per-value
+    (map final-shape
+         (build-list num-of-values (λ (x) x))
+         result-by-value))
+  (when (debug-mode) (printf "final-shape-per-value = ~v\n" final-shape-per-value))
 
 
+  (define final-data-list (map (λ (res final-shape) (rem-array final-shape (apply vector-append (for/list ([r res]) (rem-array-data r)))))
+                               result-by-value
+                               final-shape-per-value))
+  (when (debug-mode) (printf "Results of apply: ~v\n" final-data-list))
 
+  (apply values final-data-list))
+ #|
   (cond [(and (equal? 1 (vector-length result-cells))
            (> (length (vector-ref result-cells 0)) 1))
       (apply values (map (lambda (cell-val) (rem-array final-shape cell-val)) (vector-ref result-cells 0)))]
@@ -178,8 +203,8 @@
             (printf "(equal? #() final-shape) = ~v\n"
                     (equal? #() final-shape)))
           (rem-array final-shape final-data))]))
-
-  #|
+|#
+ #|
   ;; determine final result data: all result cells' data vectors concatenated
   (define final-data
     (apply vector-append
@@ -581,7 +606,9 @@
 
 ;;; Apply what may be a Remora array or Racket procedure to some Remora arrays,
 ;;; with a possible result shape annotation
-(provide (contract-out
+
+(provide remora-apply)
+#;(provide (contract-out
           (remora-apply (->* (procedure?)
                              (#:result-shape
                               (or/c symbol?
