@@ -321,14 +321,22 @@
 
 (define-primop (R_append [arr1 all] [arr2 all])
   (define cell-shape
-    (if (equal? (vector-drop (rem-array-shape arr1) 1)
+    (cond [(and (vector-empty? (rem-array-shape arr1))
+                (equal? (rem-array-shape arr1) (rem-array-shape arr2)))
+           (vector)]
+          [(equal? (vector-drop (rem-array-shape arr1) 1)
                 (vector-drop (rem-array-shape arr2) 1))
-        (vector-drop (rem-array-shape arr1) 1)
-        (error 'R_append "shape mismatch: ~v\t~v" arr1 arr2)))
+           (vector-drop (rem-array-shape arr1) 1)]
+          [else (error 'R_append "shape mismatch: ~v\t~v" arr1 arr2)]))
+  (define top-level-size
+    (if (and (vector-empty? (rem-array-shape arr1))
+                (equal? (rem-array-shape arr1) (rem-array-shape arr2)))
+        (vector 0)
+        (vector (+ (vector-ref (rem-array-shape arr1) 0)
+                               (vector-ref (rem-array-shape arr2) 0)))))
   (cell-list->array (append (array->cell-list arr1 -1)
                             (array->cell-list arr2 -1))
-                    (vector (+ (vector-ref (rem-array-shape arr1) 0)
-                               (vector-ref (rem-array-shape arr2) 0)))
+                    top-level-size
                     cell-shape))
 
 (module+ test
@@ -976,6 +984,7 @@
   (define index-of-elem (vector-ref (rem-array-data index-of-elem-remora) 0))
   (vector-copy! arr-data index-of-elem new-val-data)
   (rem-array shape-vec arr-data))
+
 
 
 (define-primop (R_select [bool 0] [a all] [b all])
