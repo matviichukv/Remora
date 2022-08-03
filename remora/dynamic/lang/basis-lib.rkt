@@ -859,6 +859,19 @@
   (check-equal? (remora (R_reduce (array + *) (array 0 1) (array 1 2 3 4)))
                 (remora (array 10 24))))
 
+
+
+(define (reduce-n op base arr n)
+  (define n-val (vector-ref (rem-array-data n) 0))
+  (when (< (vector-length (rem-array-shape arr)) n-val)  (error "Trying to reduce more times than there are dimensions"))
+  (cond [(zero? n-val) arr]
+        [else
+         (define foo (remora ((rerank (0 0 1) R_reduce) op base arr)))
+         (remora (R_reduce-n op base foo (sub1 n)))]))
+; reduces n times starting with the deep-most dimensions
+(define-primop (R_reduce-n [op all] [base all] [arr all] [n 0])
+  (reduce-n op base arr n))
+
 ;;; Extract a box's contents
 ;;; Applying this to an array of boxes risks producing result cells with
 ;;; mismatching shapes.
@@ -986,7 +999,60 @@
   (rem-array shape-vec arr-data))
 
 
+(define (vector-flatten nest-vec)
+  (cond [(not (vector? nest-vec)) nest-vec]
+        [(vector-empty? nest-vec) nest-vec]
+        [(vector? (vector-ref nest-vec 0)) (apply vector-append (vector->list (vector-map vector-flatten nest-vec)))]
+        [else nest-vec]))
 
+(define (dimensional-slice nest-vec offset-vec size-vec)
+  (define offset-len (vector-length offset-vec))
+  (define size-len (vector-length size-vec))
+  (cond [(and (zero? offset-len) (zero? size-vec)) (error "")]
+        [(not (equal? offset-len size-len))        (error "offset and size have different sizes")]
+        [(equal? 1 offset-len)                     (vector-take (vector-drop nest-vec (vector-ref offset-vec 0)) (vector-ref size-vec 0))]
+        [else                                      (vector-map
+                                                    (lambda (cell) (dimensional-slice cell (vector-drop offset-vec 1) (vector-drop size-vec 1)))
+                                                    (vector-take (vector-drop nest-vec (vector-ref offset-vec 0)) (vector-ref size-vec 0)))]))
+
+; arr - array to take a slice from
+; offset - offset of the slice, number of elements has to be the same as rank
+; slice-size - size of each slice's dimesion, number of elements has to be the same as rank.
+; Throws an error if offset + slice-size is larger than corresponding dimensions
+(define-primop (R_slice [arr all] [offset 1] [slice-size 1])
+  (define shape-vec (rem-array-shape arr))
+  (define offset-vec (rem-array-data offset))
+  (define slice-size-vec (rem-array-data slice-size))
+  (when (< (vector-length shape-vec) (vector-length offset-vec))
+    (error "Offset has the wrong length"))
+  (when (< (vector-length shape-vec) (vector-length slice-size-vec))
+    (error "Slice size has the wrong length"))
+  (define nested-vec-arr (array->nest-vector arr))
+  (define res-nested-vec (dimensional-slice nested-vec-arr offset-vec slice-size-vec))
+  (rem-array slice-size-vec (vector-flatten res-nested-vec)))
+
+
+(define (cart-product vectors)
+  (define cell-shape (vector-drop (rem-array-shape vectors) 1))
+  (define cells (array->cell-list vectors -1))
+  (define vector-num (length cells))
+  (cond [(zero? vector-num) vectors]
+        [(equal? vector-num 1) (remora (remora-apply (rerank (0) R_itemize) (car cells)))]
+        [else
+         (define itemized-head (remora (remora-apply (rerank (0) R_itemize) (car cells))))
+         (define cart-product-rest (cart-product (cell-list->array (cdr cells) (vector (sub1 vector-num)) cell-shape)))
+         (remora (def (append-to-rest (n 1)) ((rerank (1 1) R_append) n cart-product-rest)))
+         (define array-res (append-to-rest itemized-head))
+         (define formatted-res (array->cell-list array-res -2))
+         (cell-list->array formatted-res
+                           (vector (length formatted-res))
+                           (vector vector-num))]))
+
+; accept 2d-array where each row is an array of elements for cartesian product
+; [[1 2] [3 4] [5 6]] -> [[1 3 5] [1 3 6] [1 4 5] [1 4 6] [2 3 5] [2 3 6] [2 4 5] [2 4 6]]
+(define-primop (R_cartesian-product [vectors 2])
+  (cart-product vectors))
+  
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
 (module+ test

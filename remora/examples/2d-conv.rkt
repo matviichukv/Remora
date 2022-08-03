@@ -3,6 +3,9 @@
 (def (1d-conv-layer ())
   ...)
 
+
+(reduce-n + 0 [1 2 3] 1)
+
 (def (get-x-by-x-with-offset (arr 2) (x 0) (offset-x 0) (offset-y 0))
   (def y-cut-arr (take x (drop offset-y arr)))
   (#r(0 1)take x (#r(0 1)drop offset-x y-cut-arr)))
@@ -53,18 +56,9 @@
   (def w_ (reverse (#r(1)reverse w))) ; reverse each row and then reverse order of rows
   (def pad-dy-indices (iota [(- pad-dy-size w-size -1)]))
   (show pad-dy-indices)
-  (printf "\n")
-  (show pad-dy)
-  (printf "\n")
   (def pad-dy-inputs (#r(2 0 1 0)get-x-by-x-with-offset pad-dy w-size pad-dy-indices pad-dy-indices))
-  (show pad-dy-inputs)
-  (printf "\n")
   (def bar (#r(2 2)* pad-dy-inputs w_))
-  (show (shape-of bar))
-  (printf "\n")
   (def dxp (#r(0 0 1)reduce + 0 (#r(0 0 1)reduce + 0 bar)))
-  (show dxp)
-  (printf "\n")
   (def dx (get-x-by-x-with-offset dxp (length x) pad pad))
   (def db (reduce + 0 (reduce + 0 dy)))
   (values dx db dw))
@@ -72,16 +66,16 @@
 
 
 
-
-
-
+; a hack to make layers rank-polymorphic
+(struct data (d))
 (struct layer-class (layer forward-f backward-f))
 
 ; Fully connected layer
 (struct fc-layer (weights bias))
 
-(def (fc-layer-forward))
-(def (fc-layer-backward))
+(def (fc-layer-forward) 1)
+
+(def (fc-layer-backward) 1)
 
 (def (make-fc-layer (weights all) (bias 0))
   (layer-class (fc-layer weights bias) fc-layer-forward fc-layer-backward))
@@ -93,64 +87,101 @@
 
 ; from darknet - convolutional_layer.c
 #|
-    int m = l.n/l.groups;
-    int k = l.size*l.size*l.c/l.groups;
+    // for yolo groups are always 1
+    int m = l.n;
+    int k = l.size*l.size*l.c;
     int n = l.out_w*l.out_h;
-    for(i = 0; i < l.batch; ++i){
-        for(j = 0; j < l.groups; ++j){
-            float *a = l.weights + j*l.nweights/l.groups;
+            float *a = l.weights;
             float *b = net.workspace;
-            float *c = l.output + (i*l.groups + j)*n*m;
-            float *im =  net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w;
+            float *c = l.output;
+            float *im =  net.input;
 
             if (l.size == 1) {
                 b = im;
             } else {
-                im2col_cpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+                im2col_cpu(im, l.c, l.h, l.w, l.size, l.stride, l.pad, b);
             }
             gemm(0,0,m,n,k,1,a,k,b,n,1,c,n);
-        }
-    }
+
 
 
 M - number of filter in a layer
 N - output size (w * h for 2d)
 K - input size (w * h * channels for 2d)
 A - weights
-lda -
+lda - input size
 
 B - input
-ldb -
+ldb - also output img size?
 
 C - output
-ldc -
+ldc - output img size
 
 for each filter with index i:
   for each pixel in input with index k:
     for each pixel in output with index j:
       
 void gemm_nn_simple(int M, int N, int K,
-        float *A, int lda, 
-        float *B, int ldb,
-        float *C, int ldc)
+        float *weights, int lda, 
+        float *input, int ldb,
+        float *output, int ldc)
 {
     int i,j,k;
-    #pragma omp parallel for
     for(i = 0; i < M; ++i){
         for(k = 0; k < K; ++k){
             for(j = 0; j < N; ++j){
-                C[i*ldc+j] += A[i*lda+k]*B[k*ldb+j];
+                output[i*ldc+j] += weights[i*lda+k]*input[k*ldb+j];
             }
         }
     }
 }
 |#
-(def (conv-layer-forward))
-(def (conv-layer-backward))
+; returns a output size for a dimenstion given input size n and filter size w-size
+(def (conv-output-size (n 0) (w-size 0) (pad 0) (stride 0))
+  (add1 (floor (/ (+ n (* 2 pad) (- w-size)) stride))))
+
+; layer is the conv-layer struct, input is the data struct
+(def (conv-layer-forward (layer 0) (input 0))
+  (define w (conv-layer-weights layer))
+  (define w-shape (shape-of w))
+  (define stride (conv-layer-stride layer))
+  (define pad (conv-layer-pad layer))
+  (define data (data-d input))
+  (define padded-data (tensor-pad data pad))
+  (define input-shape (shape-of padded-data))
+  (def output-size (conv-output-size input-shape w-shape))
+  (def window-indices-per-axis (* stride (#r(0)iota output-size)))
+  (def all-windows-indices (cartesian-product window-indices-per-axis))
+  (def all-windows (slice padded-data all-windows-indices w-shape))
+  (* w all-windows))
+
+; w adn dy are a single filter/delta combo, and applications are nice because w's adn dy's agree in the top dimension
+(def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
+  (define filter-shape (shape-of w))
+  (define dy-shape (shape-of dy))
+  (define padded-input (tensor-pad input pad))
+  (define padded-input-shape (shape-of padded-input))
+  (def output-size (conv-output-size input-shape w-shape))
+  (def window-indices-per-axis (* stride (#r(0)iota filter-size)))
+  (def all-input-windows-indices (cartesian-product window-indices-per-axis))
+  (def all-input-windows (slice padded-input all-input-windows-indices dy-shape))
+  (def dw (reshape (shape-of w) (reduce-n + 0 (* all-input-windows dy) (length (shape-of dy)))))
+  (def pad-dy (tensor-pad dy (sub1 (index filter-size 0))))
+  (def pad-dy-size (length pad-dy))
+  (def pad-dy-shape (shape-of pad-dy))
+  (def pad-dy-windows-size (add1 (- pad-dy-shape filter-shape)))
+  ;(iota [(- pad-dy-size w-size -1)])
+  (def pad-dy-indices-per-axis (* stride (#r(0)iota pad-dy-windows-size)))
+  (def pad-dy-indices (cartesian-product pad-dy-indices-per-axis))
+  (def pad-dy-inputs (slice pad-dy w-size pad-dy-indices))
+  (def unfolded-dxp (* pad-dy-inputs w))
+  (def dxp (reshape ... (reduce-n + 0 unfolded-dxp (length (shape-of dy)))))
+  (def dx (slice dxp (length x) ???))
+  (values dw dx))
 
 (def (make-conv-layer (filter-size 1) (filter-num 0) (stride 0) (pad 0))
-  (layer-class (conv-layer weights bias stride pad) conv-layer-forward conv-layer-backward))
-
+  (layer-class (conv-layer (error) stride pad) conv-layer-forward conv-layer-backward))
+#|
 ; Activation layer
 (struct act-layer (act-f act-f-prime))
 
@@ -191,6 +222,11 @@ void gemm_nn_simple(int M, int N, int K,
 ; layers is [gen-layer]
 (struct network (layers input output))
 
+(define foo (build-array (fn ((_ 0)) 1) [2 2]))
+(define l (conv-layer foo 1 1))
+(println l)
+(conv-layer-forward l (data (iota [5 5])))
+|#
 
 
 
