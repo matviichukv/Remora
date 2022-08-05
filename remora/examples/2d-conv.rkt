@@ -25,15 +25,19 @@
 
 
 (def (tensor-pad (x all) (pad 0))
-  (def shape (shape-of x))
-  (def new-dim-shape (drop 1 (+ (* 2 pad) shape)))
-  (def new-dim-template (build-array (fn ((x 0)) 0) new-dim-shape))
-  (def new-dim (build-array (fn ((x 0)) new-dim-template) [pad]))
   ((select
-   (equal? (length shape) 1)
-   (fn () (append new-dim (append x new-dim)))
-   (fn () (append new-dim (append (#r(1 0)tensor-pad x pad) new-dim))))))
-#;
+    (equal? pad 0)
+    (fn () x)
+    (fn () 
+      (def shape (shape-of x))
+      (def new-dim-shape (drop 1 (+ (* 2 pad) shape)))
+      (def new-dim-template (build-array (fn ((x 0)) 0) new-dim-shape))
+      (def new-dim (build-array (fn ((x 0)) new-dim-template) [pad]))
+      ((select
+        (equal? (length shape) 1)
+        (fn () (append new-dim (append x new-dim)))
+        (fn () (append new-dim (append (#r(1 0)tensor-pad x pad) new-dim)))))))))
+
 (tensor-pad (iota [3 3]) 1)
    
 ; https://towardsdatascience.com/backpropagation-in-a-convolutional-layer-24c8d64d8509
@@ -72,13 +76,31 @@
 
 ; Fully connected layer
 (struct fc-layer (weights bias))
-
-(def (fc-layer-forward) 1)
+; TODO: not sure how fully connected layer looks like with 3d data for example
+(def (fc-layer-forward (input all) (weights all) (bias all)) 1)
 
 (def (fc-layer-backward) 1)
 
 (def (make-fc-layer (weights all) (bias 0))
   (layer-class (fc-layer weights bias) fc-layer-forward fc-layer-backward))
+
+
+(def (get-windows (input all) (window-shape 1) (stride 0))
+  (def input-shape (shape-of input))
+  (def (calc-size (n 0) (window-size 0)) (add1 (floor (/ (- n window-size) stride))))
+  (def output-shape (calc-size input-shape window-shape))
+  (def output-indices (* stride (iota (#r(0)itemize output-shape))))
+  (def all-output-window-offsets (cartesian-product output-indices))
+  (def all-windows (slice input all-output-window-offsets window-shape))
+  (reshape (append output-shape window-shape) all-windows))
+
+
+(def (mean (x all))
+  (/ (reduce-n + 0 x (length (shape-of x)))
+     (reduce * 1 (shape-of x))))
+
+(def (variance (x all) (mean 0))
+  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x))) (sub1 (reduce * 1 (shape-of x)))))
 
 ; Convolutional layer
 ; weights are n+1 dims, n is number of dimensions in data, extra dim is for multiple filters
@@ -141,54 +163,42 @@ void gemm_nn_simple(int M, int N, int K,
   (add1 (floor (/ (+ n (* 2 pad) (- w-size)) stride))))
 
 ; layer is the conv-layer struct, input is the data struct
-(def (conv-layer-forward (layer 0) (input 0))
-  (define w (conv-layer-weights layer))
+(def (conv-layer-forward (w all) (pad 0) (stride 0) (input all))
   (define w-shape (shape-of w))
-  (define stride (conv-layer-stride layer))
-  (define pad (conv-layer-pad layer))
-  (define data (data-d input))
-  (define padded-data (tensor-pad data pad))
-  (define input-shape (shape-of padded-data))
-  (def output-size (conv-output-size input-shape w-shape))
-  (def window-indices-per-axis (* stride (#r(0)iota output-size)))
-  (def all-windows-indices (cartesian-product window-indices-per-axis))
-  (def all-windows (slice padded-data all-windows-indices w-shape))
-  (* w all-windows))
+  (define padded-input (tensor-pad input pad))
+  (def all-windows (get-windows padded-input w-shape stride))
+  (reduce-n + 0 (* w all-windows) (length w-shape)))
+
+(conv-layer-forward (build-array (fn ((x 0)) 1) [2 2]) 0 1 (iota [3 3]))
 
 ; w adn dy are a single filter/delta combo, and applications are nice because w's adn dy's agree in the top dimension
 (def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
-  (define filter-shape (shape-of w))
+  (define w-shape (shape-of w))
   (define dy-shape (shape-of dy))
   (define padded-input (tensor-pad input pad))
-  (define padded-input-shape (shape-of padded-input))
-  (def output-size (conv-output-size input-shape w-shape))
-  (def window-indices-per-axis (* stride (#r(0)iota filter-size)))
-  (def all-input-windows-indices (cartesian-product window-indices-per-axis))
-  (def all-input-windows (slice padded-input all-input-windows-indices dy-shape))
-  (def dw (reshape (shape-of w) (reduce-n + 0 (* all-input-windows dy) (length (shape-of dy)))))
-  (def pad-dy (tensor-pad dy (sub1 (index filter-size 0))))
+  (def all-input-windows (get-windows padded-input dy-shape stride))
+  (def dw (reduce-n + 0 (* all-input-windows dy) (length (shape-of dy))))
+  (def pad-dy (tensor-pad dy (sub1 (index w-shape 0))))
   (def pad-dy-size (length pad-dy))
-  (def pad-dy-shape (shape-of pad-dy))
-  (def pad-dy-windows-size (add1 (- pad-dy-shape filter-shape)))
-  ;(iota [(- pad-dy-size w-size -1)])
-  (def pad-dy-indices-per-axis (* stride (#r(0)iota pad-dy-windows-size)))
-  (def pad-dy-indices (cartesian-product pad-dy-indices-per-axis))
-  (def pad-dy-inputs (slice pad-dy w-size pad-dy-indices))
+  (def pad-dy-inputs (get-windows pad-dy w-shape stride))
   (def unfolded-dxp (* pad-dy-inputs w))
-  (def dxp (reshape ... (reduce-n + 0 unfolded-dxp (length (shape-of dy)))))
-  (def dx (slice dxp (length x) ???))
-  (values dw dx))
+  (def dxp (reduce-n + 0 unfolded-dxp (length w-shape)))
+  (values dw dxp))
 
 (def (make-conv-layer (filter-size 1) (filter-num 0) (stride 0) (pad 0))
   (layer-class (conv-layer (error) stride pad) conv-layer-forward conv-layer-backward))
-#|
+
 ; Activation layer
 (struct act-layer (act-f act-f-prime))
 
-(def (act-layer-forward))
-(def (act-layer-backward))
+(def (act-layer-forward (layer 0) (input all))
+  (def f (act-layer-act-f layer))
+  (f input))
+(def (act-layer-backward (layer 0) (dy all))
+  (def f-prime (act-layer-act-f-prime layer))
+  (* (f-prime dy) dy))
 
-(def (make-act-layer () () ()))
+(def (make-act-layer) 1)
 
 ; Actiovation function + derivatives
 (def (leaky-relu (x 0))
@@ -204,29 +214,52 @@ void gemm_nn_simple(int M, int N, int K,
 ; Max pooling layer
 (struct max-pool (size))
 
-(def (max-pool-layer-forward))
-(def (max-pool-layer-backward))
+; input is single input data 'frame'
+(def (max-pool-layer-forward (input all) (stride 0) (size 0) (pad 0))
+  (def padded-input (tensor-pad input pad))
+  (def padded-input-shape (shape-of padded-input))
+  (def pool-shape (build-array (fn ((_ 0)) size) [(length padded-input-shape)]))
+  (def windows (get-windows padded-input pool-shape stride))
+  
+  (reduce-n max -inf.0 windows (length padded-input-shape)))
+;(max-pool-layer-forward (iota [4 4]) 2 2 1)
+
+(def (max-pool-layer-backward) 1)
 
 ; Dropout layer
 (struct dropout (prob))
 
-(def (dropout-layer-forward))
-(def (dropout-layer-backward))
+; rand-number-gen for consistent randomness during debugging
+(def (dropout-layer-forward (input all) (prob 0) (scale 0) (rand-number-gen 0))
+  (def input-shape (shape-of input))
+  (def random-numbers (build-array (fn ((_ 0)) (random rand-number-gen)) input-shape))
+  (def dropout-filter (< random-numbers prob))
+  (def dropout-select (fn ((bool 0) (x 0)) (select bool 0 x)))
+  (def dropout-result (dropout-select dropout-filter input))
+  (values dropout-result dropout-filter))
+(def-values (d-res d-fil) (dropout-layer-forward (iota [4 4]) 0.5 1 (current-pseudo-random-generator)))
 
-(struct detection ())
+(def (dropout-layer-backward (input-filter all) (dy all) (scale 0))
+  (def dropout-back (fn ((bool 0) (x 0)) (select bool 0 (* x scale))))
+  (dropout-back input-filter dy))
+(println "foo")
+(show d-fil)
+(show d-res)
+(dropout-layer-backward d-fil (build-array (fn ((_ 0)) (random)) [4 4]) 1)
+
+(struct detection (foo))
 
 ; Batch-normalization layer
 
+(struct batch-norm (rolling-mean rolling-var))
 
+(def (batch-norm-forward) (error))
+
+(def (batch-norm-backward) (error))
 
 ; layers is [gen-layer]
 (struct network (layers input output))
 
-(define foo (build-array (fn ((_ 0)) 1) [2 2]))
-(define l (conv-layer foo 1 1))
-(println l)
-(conv-layer-forward l (data (iota [5 5])))
-|#
 
 
 
