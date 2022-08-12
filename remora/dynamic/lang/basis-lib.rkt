@@ -300,7 +300,18 @@
   (rem-array (vector-append frame-shape cell-shape)
              (apply vector-append (map rem-array-data arrs))))
 
-
+; n is a positive number representing how deep to go to apply f to cells
+; e.g. given [[1 2 3] [4 5 6]] n = 1 will apply f to [1 2 3] and [4 5 6],
+; while n = 2 will apply it to 1, 2, 3, 4, 5, 6
+; f has to produce elements of the same shape
+(define-primop (R_map-cell [arr all] [f 0] [n 0])
+  (define cells (array->cell-list arr (- n)))
+  (define mapped-cells (map f cells))
+  (if (empty? mapped-cells)
+      (error)
+      (cell-list->array mapped-cells
+                    (length cells)
+                    (rem-array-shape (car mapped-cells)))))
 
 (define-primop (R_reverse [arr all])
   (if (zero? (vector-length (rem-array-shape arr)))

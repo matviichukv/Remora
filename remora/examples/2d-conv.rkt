@@ -247,23 +247,221 @@ void gemm_nn_simple(int M, int N, int K,
 (show d-res)
 (dropout-layer-backward d-fil (build-array (fn ((_ 0)) (random)) [4 4]) 1)
 
+; detection layer
+
 (struct detection (foo))
+
+(def (yolo-box-rmse (a 0) (b 0)))
+
+(def (yolo-box-iou (a 0) (b 0)))
+
+; input should be of dimenstion: <shape of cells>x<shape of detection res>
+; shape of cells is 2d (w*h for imgs. w*h*time for video)
+; shape of detection res is <number of boxes per cell> + <number of classes>
+; each box is the struct yolo-box
+; returns the input as it's the prediction of the yolo network + dy of the same shape as input that's the delta
+; n > 0
+(def (detection-forward (input all) (truth all) (classes 0) (side 0) (n 0) (sqrt 0)
+                        (obj-scale 0) (noobj-scale 0) (coord-scale 0) (class-scale 0))
+  (def locations (* side side))
+  (def boxes-pred (#r(1 1 1)slice input [0] [n]))
+  (def class-pred (#r(1 1 1)slice input [n] [classes]))
+  (def box-truth (#r(1 1)index truth [0]))
+  (def class-truth (#r(1 1 1)slice truth [1] [classes]))
+  ; class delta stuff
+  (def class-delta (* class-scale (- class-truth class-pred)))
+  (def class-cost (reduce + 0 (* class-scale (expt (- class-truth class-pred) 2))))
+  ; confidence delta stuff
+  (def confidence-delta (* noobj-scale (- (yolo-box-confidence boxes-pred))))
+  ; box delta stuff
+  
+  (struct best-box-stats (box iou rmse))
+  ; a is a best-box-stats and b is a single yolo-box
+  ; double chech that this is correct, maybe need to 
+  (def (box-cmp (truth 0))
+    (fn ((best 0) (next 0))
+        (def iou (yolo-box-iou next truth))
+        (def rmse (yolo-box-rmse next truth))
+        (def best-iou (best-box-stats-iou best))
+        (def best-rmse (best-box-stats-rmse best))
+        (select (or (> best-iou 0) (> iou 0))
+                (select (> iou best-iou) (best-box-stats next iou rmse) best)
+                (select (< rmse best-rmse) (best-box-stats next iou rmse) best))))
+  (def first-box (#r(1)head boxes-pred))
+  (def rest-boxes (#r(1)behead boxes-pred))
+  (def best-box (reduce box-cmp first-box rest-boxes))
+  (def box-delta )
+  (def cost (+ class-cost))
+  (values input cost))
+
+(def (detection-backward (dy all)) (error))
 
 ; Batch-normalization layer
 
 (struct batch-norm (rolling-mean rolling-var))
 
-(def (batch-norm-forward) (error))
+; rolling-mean size = rolling-var size = bias size = number of channels in input (first dimesion
+; train is a bool whether
+#;
+(def (batch-norm-forward (input all) (rolling-mean 1) (rolling-var 1) (bias 1) (train 0))
+  (def input-mean (map-cells input mean 1))
+  (def input-var  (map-cells input (fn ((x all)) ()) 1))
+  (def new-rolling-mean (+ (* 0.99 rolling-mean) (* 0.01 input-mean)))
+  (def new-rolling-var (+ (* 0.99 rolling-var) (* 0.01 input-var)))
+  (def mean-to-use (select train new-rolling-mean rolling-mean))
+  (def var-to-use  (select train new-rolling-var rolling-var))
+  (def normalized-output (/ (- input mean-to-use) (+ (sqrt var-to-use) 0.000001)))
+  (values (+ normalized-output bias) new-rolling-mean new-rolling-var))
+#;
+(def (batch-norm-backward (dy all) (input all) (mean 1) (var 1) (rolling-mean 1) (rolling-var 1) (train 0))
+  (def spatial (reduce * 1 (drop 1 (shape-of dy))))
+  (def var-to-use  (select train ... ...)) ; add 0.00001 to both
+  (def mean-to-use (select train ... ...))
+  (def db (reduce-n + 0 delta ...))
+  (def dmean (* -1 (/ (reduce-n + 0 dy (sub1 (length (shape-of dy)))) (sqrt var-to-use))))
+  (def dvar-wip (reduce-n + 0 (* dy (- input mean-to-use)) (sub1 (length (shape-of dy)))))
+  (def dvar (* dvar-wip -0.5 (expt var-to-use -3/2)))
+  (def dx (+ (/ dy (sqrt var-to-use))
+             (/ (* 2 dvar (- input mean-to-use)) spatial)
+             (/ dmean spatial)))
+  (values dx db dmean dvar))
 
-(def (batch-norm-backward) (error))
+(def (loss-func) (error))
 
+; w and h are normalized - 1.0 means the width of the image
+; x and y are normalized - offsets from grid cell, where 1.0 is the size of the grid cell box (which is 1/s, s is the side of the output)
+; also x and y are the center of the box
+(struct yolo-box (x y w h confidence))
+
+(def (yolo-box-delta (box1 0) (box2 0) (sqrt-flag 0) (coord-scale 0))
+  (def new-w (select sqrt-flag
+                     (sqrt (- (yolo-box-w box1) (yolo-box-w box2)))
+                     (- (yolo-box-w box1) (yolo-box-w box2))))
+   (def new-w (select sqrt-flag
+                     (sqrt (- (yolo-box-h box1) (yolo-box-h box2)))
+                     (- (yolo-box-h box1) (yolo-box-h box2))))
+  (yolo-box (- (yolo-box-x box1) (yolo-box-x box2))
+            (- (yolo-box-y box1) (yolo-box-y box2))
+            (- (yolo-box-w box1) (yolo-box-w box2))
+            (- (yolo-box-h box1) (yolo-box-h box2))
+            (- (yolo-box-confidence box1) (yolo-box-confidence box2))))
+ 
+  
 ; layers is [gen-layer]
 (struct network (layers input output))
 
 
 
 
+#|
+int locations = l.side*l.side;
+float avg_iou = 0;
+        int count = 0;
+        *(l.cost) = 0;
+        int size = l.inputs * l.batch;
+        memset(l.delta, 0, size * sizeof(float));
+            for (i = 0; i < locations; ++i) {
+                int truth_index = i*(1+l.coords+l.classes);
+                int is_obj = net.truth[truth_index];
+                for (j = 0; j < l.n; ++j) {
+                    int p_index = locations*l.classes + i*l.n + j;
+                    l.delta[p_index] = l.noobject_scale*(0 - l.output[p_index]);
+                    *(l.cost) += l.noobject_scale*pow(l.output[p_index], 2);
+                }
 
+                int best_index = -1;
+                float best_iou = 0;
+                float best_rmse = 20;
+
+                if (!is_obj){
+                    continue;
+                }
+
+                int class_index = i*l.classes;
+                for(j = 0; j < l.classes; ++j) {
+                    l.delta[class_index+j] = l.class_scale * (net.truth[truth_index+1+j] - l.output[class_index+j]);
+                    *(l.cost) += l.class_scale * pow(net.truth[truth_index+1+j] - l.output[class_index+j], 2);
+                    if(net.truth[truth_index + 1 + j]) avg_cat += l.output[class_index+j];
+                    avg_allcat += l.output[class_index+j];
+                }
+
+                box truth = float_to_box(net.truth + truth_index + 1 + l.classes, 1);
+                truth.x /= l.side;
+                truth.y /= l.side;
+
+                for(j = 0; j < l.n; ++j){
+                    int box_index = index + locations*(l.classes + l.n) + (i*l.n + j) * l.coords;
+                    box out = float_to_box(l.output + box_index, 1);
+                    out.x /= l.side;
+                    out.y /= l.side;
+
+                    if (l.sqrt){
+                        out.w = out.w*out.w;
+                        out.h = out.h*out.h;
+                    }
+
+                    float iou  = box_iou(out, truth);
+                    //iou = 0;
+                    float rmse = box_rmse(out, truth);
+                    if(best_iou > 0 || iou > 0){
+                        if(iou > best_iou){
+                            best_iou = iou;
+                            best_index = j;
+                        }
+                    }else{
+                        if(rmse < best_rmse){
+                            best_rmse = rmse;
+                            best_index = j;
+                        }
+                    }
+                }
+
+                if(l.forced){
+                    if(truth.w*truth.h < .1){
+                        best_index = 1;
+                    }else{
+                        best_index = 0;
+                    }
+                }
+                if(l.random && *(net.seen) < 64000){
+                    best_index = rand()%l.n;
+                }
+
+                int box_index = locations*(l.classes + l.n) + (i*l.n + best_index) * l.coords;
+                int tbox_index = truth_index + 1 + l.classes;
+
+                box out = float_to_box(l.output + box_index, 1);
+                out.x /= l.side;
+                out.y /= l.side;
+                if (l.sqrt) {
+                    out.w = out.w*out.w;
+                    out.h = out.h*out.h;
+                }
+                float iou  = box_iou(out, truth);
+
+                //printf("%d,", best_index);
+                int p_index = locations*l.classes + i*l.n + best_index;
+                *(l.cost) -= l.noobject_scale * pow(l.output[p_index], 2);
+                *(l.cost) += l.object_scale * pow(1-l.output[p_index], 2);
+                l.delta[p_index] = l.object_scale * (1.-l.output[p_index]);
+
+                if(l.rescore){
+                    l.delta[p_index] = l.object_scale * (iou - l.output[p_index]);
+                }
+
+                l.delta[box_index+0] = l.coord_scale*(net.truth[tbox_index + 0] - l.output[box_index + 0]);
+                l.delta[box_index+1] = l.coord_scale*(net.truth[tbox_index + 1] - l.output[box_index + 1]);
+                l.delta[box_index+2] = l.coord_scale*(net.truth[tbox_index + 2] - l.output[box_index + 2]);
+                l.delta[box_index+3] = l.coord_scale*(net.truth[tbox_index + 3] - l.output[box_index + 3]);
+                if(l.sqrt){
+                    l.delta[box_index+2] = l.coord_scale*(sqrt(net.truth[tbox_index + 2]) - l.output[box_index + 2]);
+                    l.delta[box_index+3] = l.coord_scale*(sqrt(net.truth[tbox_index + 3]) - l.output[box_index + 3]);
+                }
+
+                *(l.cost) += pow(1-iou, 2);
+            }
+        }
+|#
 
 
 
