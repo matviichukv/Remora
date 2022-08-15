@@ -251,9 +251,36 @@ void gemm_nn_simple(int M, int N, int K,
 
 (struct detection (foo))
 
-(def (yolo-box-rmse (a 0) (b 0)))
+(def (yolo-box-rmse (a 0) (b 0))
+  (sqrt (+ (expt (- (yolo-box-x a) (yolo-box-x b)) 2)
+           (expt (- (yolo-box-y a) (yolo-box-y b)) 2)
+           (expt (- (yolo-box-w a) (yolo-box-w b)) 2)
+           (expt (- (yolo-box-h a) (yolo-box-h b)) 2))))
 
-(def (yolo-box-iou (a 0) (b 0)))
+(def (overlap (x1 0) (w1 0) (x2 0) (w2 0))
+  (def l1 (- x1 (/ w1 2)))
+  (def l2 (- x2 (/ w2 2)))
+  (def left (select (> l1 l2) l1 l2))
+  (def r1 (+ x1 (/ w1 2)))
+  (def r2 (+ x2 (/ w2 2)))
+  (def right (select (< r1 r2) r1 r2))
+  (- right left))
+
+(def (yolo-box-intersect (a 0) (b 0))
+  (def w (overlap (yolo-box-x a) (yolo-box-w a) (yolo-box-x b) (yolo-box-w b)))
+  (def h (overlap (yolo-box-y a) (yolo-box-h a) (yolo-box-y b) (yolo-box-h b)))
+  (def area (* w h))
+  (select (< area 0) 0 area))
+
+(def (yolo-box-union (a 0) (b 0))
+  (def i (yolo-box-intersect a b))
+  (+ (* (yolo-box-w a) (yolo-box-h a))
+     (* (yolo-box-w b) (yolo-box-h b))
+     (- i)))
+
+(def (yolo-box-iou (a 0) (b 0))
+  (/ (yolo-box-intersect a b)
+     (yolo-box-union a b)))
 
 ; input should be of dimenstion: <shape of cells>x<shape of detection res>
 ; shape of cells is 2d (w*h for imgs. w*h*time for video)
@@ -289,12 +316,13 @@ void gemm_nn_simple(int M, int N, int K,
                 (select (< rmse best-rmse) (best-box-stats next iou rmse) best))))
   (def first-box (#r(1)head boxes-pred))
   (def rest-boxes (#r(1)behead boxes-pred))
-  (def best-box (reduce box-cmp first-box rest-boxes))
-  (def box-delta )
+  (def best-box (#r(0 1 1)reduce box-cmp first-box rest-boxes))
+  (def box-delta (yolo-box-delta best-box))
   (def cost (+ class-cost))
-  (values input cost))
+  (values input box-delta cost))
 
-(def (detection-backward (dy all)) (error))
+; there is no error, since we 
+(def (detection-backward (dy all)) dy)
 
 ; Batch-normalization layer
 
@@ -302,22 +330,22 @@ void gemm_nn_simple(int M, int N, int K,
 
 ; rolling-mean size = rolling-var size = bias size = number of channels in input (first dimesion
 ; train is a bool whether
-#;
+
 (def (batch-norm-forward (input all) (rolling-mean 1) (rolling-var 1) (bias 1) (train 0))
-  (def input-mean (map-cells input mean 1))
-  (def input-var  (map-cells input (fn ((x all)) ()) 1))
+  (def input-mean (#r(-1)mean input))
+  (def input-var  (#r(-1 0)variance input input-mean))
   (def new-rolling-mean (+ (* 0.99 rolling-mean) (* 0.01 input-mean)))
   (def new-rolling-var (+ (* 0.99 rolling-var) (* 0.01 input-var)))
   (def mean-to-use (select train new-rolling-mean rolling-mean))
   (def var-to-use  (select train new-rolling-var rolling-var))
   (def normalized-output (/ (- input mean-to-use) (+ (sqrt var-to-use) 0.000001)))
   (values (+ normalized-output bias) new-rolling-mean new-rolling-var))
-#;
+
 (def (batch-norm-backward (dy all) (input all) (mean 1) (var 1) (rolling-mean 1) (rolling-var 1) (train 0))
   (def spatial (reduce * 1 (drop 1 (shape-of dy))))
   (def var-to-use  (select train ... ...)) ; add 0.00001 to both
   (def mean-to-use (select train ... ...))
-  (def db (reduce-n + 0 delta ...))
+  (def db (reduce-n + 0 dy ...))
   (def dmean (* -1 (/ (reduce-n + 0 dy (sub1 (length (shape-of dy)))) (sqrt var-to-use))))
   (def dvar-wip (reduce-n + 0 (* dy (- input mean-to-use)) (sub1 (length (shape-of dy)))))
   (def dvar (* dvar-wip -0.5 (expt var-to-use -3/2)))
@@ -337,13 +365,13 @@ void gemm_nn_simple(int M, int N, int K,
   (def new-w (select sqrt-flag
                      (sqrt (- (yolo-box-w box1) (yolo-box-w box2)))
                      (- (yolo-box-w box1) (yolo-box-w box2))))
-   (def new-w (select sqrt-flag
+  (def new-w (select sqrt-flag
                      (sqrt (- (yolo-box-h box1) (yolo-box-h box2)))
                      (- (yolo-box-h box1) (yolo-box-h box2))))
   (yolo-box (- (yolo-box-x box1) (yolo-box-x box2))
             (- (yolo-box-y box1) (yolo-box-y box2))
-            (- (yolo-box-w box1) (yolo-box-w box2))
-            (- (yolo-box-h box1) (yolo-box-h box2))
+            new-w
+            new-h
             (- (yolo-box-confidence box1) (yolo-box-confidence box2))))
  
   
