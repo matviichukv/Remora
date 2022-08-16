@@ -42,6 +42,7 @@
   
   ;; identify expected argument cell ranks
   (define individual-exp-ranks
+    ; p is each procedure we are applying
     (for/list [(p (rem-array-data fun))]
       (when (debug-mode) (printf "checking expected ranks for ~v\n" p))
       (for/vector [(t (rem-proc-ranks p))
@@ -62,12 +63,23 @@
   (when (debug-mode) (printf "expected-rank = ~v\n" expected-rank))
   
   ;; find principal frame shape
+  (define foo (for/fold ([max-frame (rem-array-shape fun)])
+          ([arr args]
+           [r expected-rank])
+          #;(printf "exp rank: ~v; max-frame so far: ~v; arr frame: ~v \n" r max-frame (rem-array-shape arr))
+          (prefix-max 
+           (if (>= r 0)
+               (vector-drop-right (rem-array-shape arr) r)
+               (vector-take (rem-array-shape arr) (- r)))
+           max-frame)))
   (define principal-frame
     (or (for/fold ([max-frame (rem-array-shape fun)])
           ([arr args]
            [r expected-rank])
           (prefix-max 
-           (vector-drop-right (rem-array-shape arr) r)
+           (if (>= r 0)
+               (vector-drop-right (rem-array-shape arr) r)
+               (vector-take (rem-array-shape arr) (- r)))
            max-frame))
         (error "Incompatible argument frames"
                (cons (rem-array-shape fun)
@@ -80,14 +92,20 @@
   (define cell-sizes
     (for/list ([arr args]
                [r expected-rank])
-      (sequence-fold * 1 (vector-take-right (rem-array-shape arr) r))))
+      (sequence-fold * 1
+                     (if (>= r 0)
+                         (vector-take-right (rem-array-shape arr) r)
+                         (vector-drop (rem-array-shape arr) (- r))))))
   (when (debug-mode) (printf "cell-sizes = ~v\n" cell-sizes))
   
   ;; compute argument frame sizes
   (define frame-sizes
     (for/list ([arr args]
                [r expected-rank])
-      (sequence-fold * 1 (vector-drop-right (rem-array-shape arr) r))))
+      (sequence-fold * 1
+                     (if (>= r 0)
+                         (vector-drop-right (rem-array-shape arr) r)
+                         (vector-take (rem-array-shape arr) (- r))))))
   (when (debug-mode) (printf "frame-sizes = ~v\n" frame-sizes))
   
   ;; compute each result cell
@@ -118,7 +136,9 @@
           (define arg-cell
             (begin
               (when (debug-mode) (printf " (not single box)"))
-              (rem-array (vector-take-right (rem-array-shape arr) r)
+              (rem-array (if (>= r 0)
+                             (vector-take-right (rem-array-shape arr) r)
+                             (vector-drop (rem-array-shape arr) (- r)))
                          (subvector (rem-array-data arr)
                                     offset
                                     csize))))
@@ -364,7 +384,7 @@
 
 ;;; A valid expected rank is either a natural number or 'all
 (define (rank? r)
-  (or (exact-nonnegative-integer? r) (equal? 'all r)))
+  (or (exact-integer? r) (equal? 'all r)))
 
 ;;; Print, write, or display a Remora procedure
 (define (show-rem-proc proc [port (current-output-port)] [mode 0])

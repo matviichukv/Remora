@@ -6,7 +6,12 @@
          (rename-in racket/base [apply racket-apply] [values racket-values])
          (for-syntax syntax/parse
                      (except-in racket/base apply unbox)
-                     (rename-in racket/base [apply racket-apply] [values racket-values])
+                     (rename-in racket/base
+                                [apply racket-apply]
+                                [values racket-values]
+                                [if racket-if]
+                                [cond racket-code]
+                                [letrec racket-letrec])
                      racket/list
                      racket/syntax))
 
@@ -47,7 +52,8 @@
     #:description "Remora argument rank"
     #:literals (all)
     (pattern all)
-    (pattern cell-rank:nat))
+    (pattern cell-rank:number))
+    ;(pattern cell-rank:nat))
   (define-syntax-class ATOM
     #:description "Remora atom"
     #:literals (fn all)
@@ -59,6 +65,13 @@
     (pattern (array piece:ALITERAL ...))
     (pattern (alit (dim:nat ...) elt:ATOM ...))))
 
+(define-syntax (if stx)
+  (syntax-parse stx
+    [(_ cnd thn els) #'(racket-if (equal? (scalar #f) (remora cnd)) (remora-els) (remora-thn))]))
+#;
+(define-syntax (cond stx))
+#;
+(define-syntax (letrec stx))
 
 (define-syntax (Rλ stx)
   (syntax-parse stx
@@ -159,6 +172,7 @@
 (define-syntax (syntax->rank-value stx)
   (syntax-parse stx
     [(_ finite-rank:nat) #'finite-rank]
+    [(_ finite-rank:number) #'finite-rank] ; only negative 
     [(_ all) (syntax 'all)]))
 
 ;;; (alit (nat ...) atom ...)
