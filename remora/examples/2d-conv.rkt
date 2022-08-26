@@ -1,5 +1,8 @@
 #lang remora/dynamic
 
+(def (showln (a all))
+  (show a) (printf "\n"))
+
 (def (get-x-by-x-with-offset (arr 2) (x 0) (offset-x 0) (offset-y 0))
   (def y-cut-arr (take x (drop offset-y arr)))
   (#r(0 1)take x (#r(0 1)drop offset-x y-cut-arr)))
@@ -35,7 +38,7 @@
 (tensor-pad (iota [3 3]) 1)
    
 ; https://towardsdatascience.com/backpropagation-in-a-convolutional-layer-24c8d64d8509
-
+#;
 (def (2d-convolution-backpropagation (dy 2) (x 2) (w 2) (b 0) (pad 0) (stride 0))
   (define w-shape (shape-of w))
   (define pad-x (tensor-pad x pad))
@@ -94,80 +97,26 @@
      (reduce * 1 (shape-of x))))
 
 (def (variance (x all) (mean 0))
-  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x))) (sub1 (reduce * 1 (shape-of x)))))
+  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x))) (reduce * 1 (shape-of x))))
 
 ; Convolutional layer
 ; weights are n+1 dims, n is number of dimensions in data, extra dim is for multiple filters
 ; no bias because YOLO does not use it (it uses batch norm layer in all conv layers instead)
 (struct conv-layer (weights stride pad))
 
-; from darknet - convolutional_layer.c
-#|
-    // for yolo groups are always 1
-    int m = l.n;
-    int k = l.size*l.size*l.c;
-    int n = l.out_w*l.out_h;
-            float *a = l.weights;
-            float *b = net.workspace;
-            float *c = l.output;
-            float *im =  net.input;
-
-            if (l.size == 1) {
-                b = im;
-            } else {
-                im2col_cpu(im, l.c, l.h, l.w, l.size, l.stride, l.pad, b);
-            }
-            gemm(0,0,m,n,k,1,a,k,b,n,1,c,n);
-
-
-
-M - number of filter in a layer
-N - output size (w * h for 2d)
-K - input size (w * h * channels for 2d)
-A - weights
-lda - input size
-
-B - input
-ldb - also output img size?
-
-C - output
-ldc - output img size
-
-for each filter with index i:
-  for each pixel in input with index k:
-    for each pixel in output with index j:
-      
-void gemm_nn_simple(int M, int N, int K,
-        float *weights, int lda, 
-        float *input, int ldb,
-        float *output, int ldc)
-{
-    int i,j,k;
-    for(i = 0; i < M; ++i){
-        for(k = 0; k < K; ++k){
-            for(j = 0; j < N; ++j){
-                output[i*ldc+j] += weights[i*lda+k]*input[k*ldb+j];
-            }
-        }
-    }
-}
-|#
 ; returns a output size for a dimenstion given input size n and filter size w-size
 (def (conv-output-size (n 0) (w-size 0) (pad 0) (stride 0))
   (add1 (floor (/ (+ n (* 2 pad) (- w-size)) stride))))
 
 ; layer is the conv-layer struct, input is the data struct
-(def (conv-layer-forward (w all) (pad 0) (stride 0) (input all))
+(def (conv-layer-forward (input all) (w all) (pad 0) (stride 0))
   (define w-shape (shape-of w))
   (define padded-input (tensor-pad input pad))
   (def all-windows (get-windows padded-input w-shape stride))
-  (show w-shape)
-  (printf "\n")
-  (show (shape-of all-windows))
-  (printf "\n")
-  (reduce-n + 0 (* w all-windows) (length w-shape)))
-
-(conv-layer-forward (build-array (fn ((x 0)) 1) [2 2]) 0 1 (iota [4 4]))
+  (def w-replicated (reshape (shape-of all-windows) w))
+  (reduce-n + 0 (* w-replicated all-windows) (length w-shape)))
+#;
+(conv-layer-forward (build-array (fn ((x 0)) 1) [1 1]) 0 1 (iota [3 3]))
 
 ; w adn dy are a single filter/delta combo, and applications are nice because w's adn dy's agree in the top dimension
 (def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
@@ -175,24 +124,33 @@ void gemm_nn_simple(int M, int N, int K,
   (define dy-shape (shape-of dy))
   (define padded-input (tensor-pad input pad))
   (def all-input-windows (get-windows padded-input dy-shape stride))
-  (println "testing weird mult")
-  (* all-input-windows dy)
-  (def dw (reduce-n + 0 (* all-input-windows dy) (length (shape-of dy))))
-  (def pad-dy (tensor-pad dy (sub1 (index w-shape 0))))
+  (def dy-replicated (reshape (shape-of all-input-windows) dy))
+  
+  (def dw (reduce-n + 0 (* all-input-windows dy-replicated) (length (shape-of dy))))
+  
+  (def pad-dy (tensor-pad dy (sub1 (index w-shape [0]))))
   (def pad-dy-size (length pad-dy))
+  
   (def pad-dy-inputs (get-windows pad-dy w-shape stride))
-  (def unfolded-dxp (* pad-dy-inputs w))
+  (def w-replicated (reshape (shape-of pad-dy-inputs) w)) ; replicating w to have 
+  (def unfolded-dxp (* pad-dy-inputs w-replicated))
   (def dxp (reduce-n + 0 unfolded-dxp (length w-shape)))
   (values dw dxp))
 #;
 (debug-mode #t)
-#;
-(conv-layer-backward [[0.5 0.5 0.5 0.5]
-                      [0.5 0.5 0.5 0.5]
-                      [0.5 0.5 0.5 0.5]
-                      [0.5 0.5 0.5 0.5]]
-                     [[1 2]
-                      [3 4]]
+(println "backstuff")
+(#r(-1 -1 all 0 0)conv-layer-backward [[[0.5 0.5 0.5 0.5]
+                       [0.5 0.5 0.5 0.5]
+                       [0.5 0.5 0.5 0.5]
+                       [0.5 0.5 0.5 0.5]]
+                      [[0.75 0.75 0.75 0.75]
+                       [0.75 0.75 0.75 0.75]
+                       [0.75 0.75 0.75 0.75]
+                       [0.75 0.75 0.75 0.75]]]
+                     [[[1 2]
+                       [3 4]]
+                      [[1 1]
+                       [1 1]]]
                      [[2 1 3 4 2]
                       [2 5 1 2 2]
                       [4 3 3 1 2]
@@ -252,6 +210,7 @@ void gemm_nn_simple(int M, int N, int K,
   (def dropout-select (fn ((bool 0) (x 0)) (select bool 0 x)))
   (def dropout-result (dropout-select dropout-filter input))
   (values dropout-result dropout-filter))
+#;
 (def-values (d-res d-fil) (dropout-layer-forward (iota [4 4]) 0.5 1 (current-pseudo-random-generator)))
 
 (def (dropout-layer-backward (input-filter all) (dy all) (scale 0))
@@ -349,10 +308,16 @@ void gemm_nn_simple(int M, int N, int K,
   (def input-var  (#r(-1 0)variance input input-mean))
   (def new-rolling-mean (+ (* 0.99 rolling-mean) (* 0.01 input-mean)))
   (def new-rolling-var (+ (* 0.99 rolling-var) (* 0.01 input-var)))
-  (def mean-to-use (select train new-rolling-mean rolling-mean))
-  (def var-to-use  (select train new-rolling-var rolling-var))
-  (def normalized-output (/ (- input mean-to-use) (+ (sqrt var-to-use) 0.000001)))
-  (values (+ normalized-output bias) new-rolling-mean new-rolling-var))
+  (def mean-to-use (select train input-mean rolling-mean))
+  (def var-to-use  (select train input-var rolling-var))
+  (show (- input mean-to-use)) (printf "\n")
+  (show (+ (sqrt var-to-use) 0.000001))  (printf "\n")
+  (def normalized-output (/ (- input mean-to-use) (sqrt (+ var-to-use 0.000001))))
+  (values (+ normalized-output bias) input-mean input-var new-rolling-mean new-rolling-var))
+
+(def-values (batch-norm-out foo bar roll-mean roll-var) (batch-norm-forward [[[2 6 1]
+                                                                              [1 5 0]
+                                                                              [2 9 7]]] [0] [0] [0] #t))
 
 (def (batch-norm-backward (dy all) (input all) (mean 1) (var 1) (rolling-mean 1) (rolling-var 1) (train 0))
   (def spatial (reduce * 1 (drop 1 (shape-of dy))))
@@ -366,6 +331,7 @@ void gemm_nn_simple(int M, int N, int K,
              (/ (* 2 dvar (- input mean-to-use)) spatial)
              (/ dmean spatial)))
   (values dx db dmean dvar))
+
 
 ; w and h are normalized - 1.0 means the width of the image
 ; x and y are normalized - offsets from grid cell, where 1.0 is the size of the grid cell box (which is 1/s, s is the side of the output)
