@@ -2,7 +2,7 @@
 
 (def (showln (a all))
   (show a) (printf "\n"))
-
+#|
 (def (get-x-by-x-with-offset (arr 2) (x 0) (offset-x 0) (offset-y 0))
   (def y-cut-arr (take x (drop offset-y arr)))
   (#r(0 1)take x (#r(0 1)drop offset-x y-cut-arr)))
@@ -19,7 +19,7 @@
 
 (def (2d-conv-layer (filter-kernel 3) (input 2) (stride 0) (pad 0) (b 0))
   (+ b (2d-conv-single-filter filter-kernel (tensor-pad input pad) stride)))
-
+|#
 
 (def (tensor-pad (x all) (pad 0))
   ((select
@@ -34,10 +34,19 @@
         (equal? (length shape) 1)
         (fn () (append new-dim (append x new-dim)))
         (fn () (append new-dim (append (#r(1 0)tensor-pad x pad) new-dim)))))))))
+
+
+; Pads the given tensor with 0's on each dimension, on each side, pad is the number of 0's to put in on each side
+#;
+(def (tensor-pad-v2 (x all) (pad 0))
+  (def new-shape (+ (shape-of x) (* 2 pad)))
+  (def origin ((fn ((_ 0)) (- pad)) new-shape))
+  (subarray/fill x origin new-shape))
 #;
 (tensor-pad (iota [3 3]) 1)
    
-; https://towardsdatascience.com/backpropagation-in-a-convolutional-layer-24c8d64d8509
+; https://towardsdatascience.com/backpropagation-in-a-convolutional-layer-24c8d64d850
+; old version, should prolly be deleted
 #;
 (def (2d-convolution-backpropagation (dy 2) (x 2) (w 2) (b 0) (pad 0) (stride 0))
   (define w-shape (shape-of w))
@@ -81,7 +90,11 @@
 (def (make-fc-layer (weights all) (bias 0))
   (layer-class (fc-layer weights bias) fc-layer-forward fc-layer-backward))
 
-
+; compute windows of shape window-shape, starting at top-left point of the array (0,0,...)
+; stride is the offset from the previous window's origin
+; example: input = (iota [4 4])
+;          window-shape = [2 2]
+; 
 (def (get-windows (input all) (window-shape 1) (stride 0))
   (def input-shape (shape-of input))
   (def (calc-size (n 0) (window-size 0)) (add1 (floor (/ (- n window-size) stride))))
@@ -91,13 +104,20 @@
   (def all-windows (slice input all-output-window-offsets window-shape))
   (reshape (append output-shape window-shape) all-windows))
 
+; returns total number of elements in the given array
+(def (num-elts (x all))
+  (reduce * 1 (shape-of x)))
 
+; compute the mean of the array x
 (def (mean (x all))
   (/ (reduce-n + 0 x (length (shape-of x)))
-     (reduce * 1 (shape-of x))))
+     (num-elts x)))
 
+; computes the variance over x, with mean being the mean of that same array.
+; you pass in mean to save on this duplicate computation
 (def (variance (x all) (mean 0))
-  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x))) (reduce * 1 (shape-of x))))
+  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x)))
+     (num-elts x)))
 
 ; Convolutional layer
 ; weights are n+1 dims, n is number of dimensions in data, extra dim is for multiple filters
@@ -108,7 +128,14 @@
 (def (conv-output-size (n 0) (w-size 0) (pad 0) (stride 0))
   (add1 (floor (/ (+ n (* 2 pad) (- w-size)) stride))))
 
-; layer is the conv-layer struct, input is the data struct
+; w should be a single filter, lifted by remora to apply to lists of filters
+; computes a convolition, input is data,
+; w is an array of weights,
+; pad is padding for input, e.g. [1 2 3] with pad 1 -> [0 1 2 3 0]; [[1 2] [3 4]] with pad 0 -> [[0 0 0 0] [0 1 2 0] [0 3 4 0] [0 0 0 0]]
+; stride is window stride - by how much to slide the input, e.g.
+; when doing convolution for input (iota [4 4]) with w of size [2 2]
+; stride 1: [[0 1] [4 5]] convolve with w; [[1 2] [5 6]] convolve with w
+; stride 2: [[0 1] [4 5]] convolve with w; [[2 3] [6 7]] convolve with w
 (def (conv-layer-forward (input all) (w all) (pad 0) (stride 0))
   (define w-shape (shape-of w))
   (define padded-input (tensor-pad input pad))
@@ -119,18 +146,17 @@
 (conv-layer-forward (build-array (fn ((x 0)) 1) [1 1]) 0 1 (iota [3 3]))
 
 ; w adn dy are a single filter/delta combo, and applications are nice because w's adn dy's agree in the top dimension
+; this computes a backwards pass and returns deltas for w and input
 (def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
   (define w-shape (shape-of w))
   (define dy-shape (shape-of dy))
   (define padded-input (tensor-pad input pad))
   (def all-input-windows (get-windows padded-input dy-shape stride))
   (def dy-replicated (reshape (shape-of all-input-windows) dy))
-  
   (def dw (reduce-n + 0 (* all-input-windows dy-replicated) (length (shape-of dy))))
   
   (def pad-dy (tensor-pad dy (sub1 (index w-shape [0]))))
   (def pad-dy-size (length pad-dy))
-  
   (def pad-dy-inputs (get-windows pad-dy w-shape stride))
   (def w-replicated (reshape (shape-of pad-dy-inputs) w)) ; replicating w to have 
   (def unfolded-dxp (* pad-dy-inputs w-replicated))
@@ -164,9 +190,11 @@
 ; Activation layer
 (struct act-layer (act-f act-f-prime))
 
+; forward pass for activation layer
 (def (act-layer-forward (layer 0) (input all))
   (def f (act-layer-act-f layer))
   (f input))
+; backward pass for activation layer
 (def (act-layer-backward (layer 0) (dy all))
   (def f-prime (act-layer-act-f-prime layer))
   (* (f-prime dy) dy))
@@ -188,10 +216,14 @@
 (struct max-pool (size))
 
 ; input is single input data 'frame'
+; Computes forward pass for max pooling layer
+; Takes a maximum value of all size-sized tensors (shape is size*size*size..., equal to rank of input)
+; e.g. input (iota [4 4]), stride 2, size 2, pad 0
+; output: [[5 7] [13 15]]
 (def (max-pool-layer-forward (input all) (stride 0) (size 0) (pad 0))
   (def padded-input (tensor-pad input pad))
   (def padded-input-shape (shape-of padded-input))
-  (def pool-shape (build-array (fn ((_ 0)) size) [(length padded-input-shape)]))
+  (def pool-shape ((fn ((_ 0)) size) padded-input-shape))
   (def windows (get-windows padded-input pool-shape stride))
   
   (reduce-n max -inf.0 windows (length padded-input-shape)))
@@ -203,6 +235,8 @@
 (struct dropout (prob))
 
 ; rand-number-gen for consistent randomness during debugging
+; prob - float 0 <= x <= 1, probability of leaving the number in (vs dropping and replacing with a 0)
+; scale - ??? not sure, not used ???
 (def (dropout-layer-forward (input all) (prob 0) (scale 0) (rand-number-gen 0))
   (def input-shape (shape-of input))
   (def random-numbers (build-array (fn ((_ 0)) (random rand-number-gen)) input-shape))
@@ -213,6 +247,11 @@
 #;
 (def-values (d-res d-fil) (dropout-layer-forward (iota [4 4]) 0.5 1 (current-pseudo-random-generator)))
 
+; dropout back pass
+; output shape = input shape
+; only propagates changes that were not dropped by the layer
+; input-filter is the result from forward pass, which shows dropped vs left in inputs (matrix of booleans)
+; scale is a scalar multiplier for dy coefficients
 (def (dropout-layer-backward (input-filter all) (dy all) (scale 0))
   (def dropout-back (fn ((bool 0) (x 0)) (select bool 0 (* x scale))))
   (dropout-back input-filter dy))
@@ -223,12 +262,15 @@
 
 (struct detection (foo))
 
+; rmse of two yolo boxes
+; rmse - root mean square error
 (def (yolo-box-rmse (a 0) (b 0))
   (sqrt (+ (expt (- (yolo-box-x a) (yolo-box-x b)) 2)
            (expt (- (yolo-box-y a) (yolo-box-y b)) 2)
            (expt (- (yolo-box-w a) (yolo-box-w b)) 2)
            (expt (- (yolo-box-h a) (yolo-box-h b)) 2))))
 
+; overlap between 
 (def (overlap (x1 0) (w1 0) (x2 0) (w2 0))
   (def l1 (- x1 (/ w1 2)))
   (def l2 (- x2 (/ w2 2)))
@@ -238,28 +280,33 @@
   (def right (select (< r1 r2) r1 r2))
   (- right left))
 
+; are of intersection of two yolo boxes
 (def (yolo-box-intersect (a 0) (b 0))
   (def w (overlap (yolo-box-x a) (yolo-box-w a) (yolo-box-x b) (yolo-box-w b)))
   (def h (overlap (yolo-box-y a) (yolo-box-h a) (yolo-box-y b) (yolo-box-h b)))
   (def area (* w h))
   (select (< area 0) 0 area))
 
+; area of union of two yolo boxes
 (def (yolo-box-union (a 0) (b 0))
   (def i (yolo-box-intersect a b))
   (+ (* (yolo-box-w a) (yolo-box-h a))
      (* (yolo-box-w b) (yolo-box-h b))
      (- i)))
 
+; intersction area of two yolo boxes divided by union of two yolo boxes
 (def (yolo-box-iou (a 0) (b 0))
   (/ (yolo-box-intersect a b)
      (yolo-box-union a b)))
 
 ; input should be of dimenstion: <shape of cells>x<shape of detection res>
-; shape of cells is 2d (w*h for imgs. w*h*time for video)
+; shape of cells - (w*h for imgs. w*h*time for video)
 ; shape of detection res is <number of boxes per cell> + <number of classes>
 ; each box is the struct yolo-box
 ; returns the input as it's the prediction of the yolo network + dy of the same shape as input that's the delta
 ; n > 0
+; computes the loss function for the given input
+; all *-scale arguments are coefficients defined by the YOLO network specification
 (def (detection-forward (input all) (truth all) (classes 0) (side 0) (n 0) (sqrt 0)
                         (obj-scale 0) (noobj-scale 0) (coord-scale 0) (class-scale 0))
   (def locations (* side side))
@@ -293,7 +340,7 @@
   (def cost (+ class-cost))
   (values input box-delta cost))
 
-; there is no error, since we 
+; we computed the dy in detection-forward layer, so we just return it
 (def (detection-backward (dy all)) dy)
 
 ; Batch-normalization layer
@@ -301,8 +348,8 @@
 (struct batch-norm (rolling-mean rolling-var))
 
 ; rolling-mean size = rolling-var size = bias size = number of channels in input (first dimesion
-; train is a bool whether
-
+; train is a bool whether it is training
+; bias is a vector of scalars that get applied to each layer after computing statistics things
 (def (batch-norm-forward (input all) (rolling-mean 1) (rolling-var 1) (bias 1) (train 0))
   (def input-mean (#r(-1)mean input))
   (def input-var  (#r(-1 0)variance input input-mean))
@@ -314,13 +361,19 @@
   (show (+ (sqrt var-to-use) 0.000001))  (printf "\n")
   (def normalized-output (/ (- input mean-to-use) (sqrt (+ var-to-use 0.000001))))
   (values (+ normalized-output bias) input-mean input-var new-rolling-mean new-rolling-var))
-
+#;
 (def-values (batch-norm-out foo bar roll-mean roll-var) (batch-norm-forward [[[2 6 1]
                                                                               [1 5 0]
                                                                               [2 9 7]]] [0] [0] [0] #t))
-
+; dy is delta of the output, shape of dy = shape of input
+; mean and var are the ones computed in forward pass
+; rolling-mean and rolling-var are the ones in the layer
+; train is where we are in the training or predicting mode
+; returns dx, db (delta in bias), dmean - delta in mean, dvar - delta in var
 (def (batch-norm-backward (dy all) (input all) (mean 1) (var 1) (rolling-mean 1) (rolling-var 1) (train 0))
+  ; spatial is the number of elements in each channel of dy
   (def spatial (reduce * 1 (drop 1 (shape-of dy))))
+  ; we need to use different mean/var in whether we are training or predicting
   (def var-to-use  (+ 0.00001 (select train mean rolling-mean))) ; add 0.00001 to both
   (def mean-to-use (+ 0.00001 (select train var rolling-var)))
   (def db (reduce-n + 0 dy (sub1 (length (shape-of dy)))))
@@ -338,7 +391,9 @@
 ; also x and y are the center of the box
 (struct yolo-box (x y w h confidence))
 
-(def (yolo-box-delta (box1 0) (box2 0) (sqrt-flag 0) (coord-scale 0))
+; find the difference between two yolo-boxes
+; sqrt-flag -sqrt the difference if true
+(def (yolo-box-delta (box1 0) (box2 0) (sqrt-flag 0))
   (def new-w (select sqrt-flag
                      (sqrt (- (yolo-box-w box1) (yolo-box-w box2)))
                      (- (yolo-box-w box1) (yolo-box-w box2))))
@@ -354,149 +409,6 @@
   
 ; layers is [gen-layer]
 (struct network (layers input output))
-
-
-
-
-#|
-int locations = l.side*l.side;
-float avg_iou = 0;
-        int count = 0;
-        *(l.cost) = 0;
-        int size = l.inputs * l.batch;
-        memset(l.delta, 0, size * sizeof(float));
-            for (i = 0; i < locations; ++i) {
-                int truth_index = i*(1+l.coords+l.classes);
-                int is_obj = net.truth[truth_index];
-                for (j = 0; j < l.n; ++j) {
-                    int p_index = locations*l.classes + i*l.n + j;
-                    l.delta[p_index] = l.noobject_scale*(0 - l.output[p_index]);
-                    *(l.cost) += l.noobject_scale*pow(l.output[p_index], 2);
-                }
-
-                int best_index = -1;
-                float best_iou = 0;
-                float best_rmse = 20;
-
-                if (!is_obj){
-                    continue;
-                }
-
-                int class_index = i*l.classes;
-                for(j = 0; j < l.classes; ++j) {
-                    l.delta[class_index+j] = l.class_scale * (net.truth[truth_index+1+j] - l.output[class_index+j]);
-                    *(l.cost) += l.class_scale * pow(net.truth[truth_index+1+j] - l.output[class_index+j], 2);
-                    if(net.truth[truth_index + 1 + j]) avg_cat += l.output[class_index+j];
-                    avg_allcat += l.output[class_index+j];
-                }
-
-                box truth = float_to_box(net.truth + truth_index + 1 + l.classes, 1);
-                truth.x /= l.side;
-                truth.y /= l.side;
-
-                for(j = 0; j < l.n; ++j){
-                    int box_index = index + locations*(l.classes + l.n) + (i*l.n + j) * l.coords;
-                    box out = float_to_box(l.output + box_index, 1);
-                    out.x /= l.side;
-                    out.y /= l.side;
-
-                    if (l.sqrt){
-                        out.w = out.w*out.w;
-                        out.h = out.h*out.h;
-                    }
-
-                    float iou  = box_iou(out, truth);
-                    //iou = 0;
-                    float rmse = box_rmse(out, truth);
-                    if(best_iou > 0 || iou > 0){
-                        if(iou > best_iou){
-                            best_iou = iou;
-                            best_index = j;
-                        }
-                    }else{
-                        if(rmse < best_rmse){
-                            best_rmse = rmse;
-                            best_index = j;
-                        }
-                    }
-                }
-
-                if(l.forced){
-                    if(truth.w*truth.h < .1){
-                        best_index = 1;
-                    }else{
-                        best_index = 0;
-                    }
-                }
-                if(l.random && *(net.seen) < 64000){
-                    best_index = rand()%l.n;
-                }
-
-                int box_index = locations*(l.classes + l.n) + (i*l.n + best_index) * l.coords;
-                int tbox_index = truth_index + 1 + l.classes;
-
-                box out = float_to_box(l.output + box_index, 1);
-                out.x /= l.side;
-                out.y /= l.side;
-                if (l.sqrt) {
-                    out.w = out.w*out.w;
-                    out.h = out.h*out.h;
-                }
-                float iou  = box_iou(out, truth);
-
-                //printf("%d,", best_index);
-                int p_index = locations*l.classes + i*l.n + best_index;
-                *(l.cost) -= l.noobject_scale * pow(l.output[p_index], 2);
-                *(l.cost) += l.object_scale * pow(1-l.output[p_index], 2);
-                l.delta[p_index] = l.object_scale * (1.-l.output[p_index]);
-
-                if(l.rescore){
-                    l.delta[p_index] = l.object_scale * (iou - l.output[p_index]);
-                }
-
-                l.delta[box_index+0] = l.coord_scale*(net.truth[tbox_index + 0] - l.output[box_index + 0]);
-                l.delta[box_index+1] = l.coord_scale*(net.truth[tbox_index + 1] - l.output[box_index + 1]);
-                l.delta[box_index+2] = l.coord_scale*(net.truth[tbox_index + 2] - l.output[box_index + 2]);
-                l.delta[box_index+3] = l.coord_scale*(net.truth[tbox_index + 3] - l.output[box_index + 3]);
-                if(l.sqrt){
-                    l.delta[box_index+2] = l.coord_scale*(sqrt(net.truth[tbox_index + 2]) - l.output[box_index + 2]);
-                    l.delta[box_index+3] = l.coord_scale*(sqrt(net.truth[tbox_index + 3]) - l.output[box_index + 3]);
-                }
-
-                *(l.cost) += pow(1-iou, 2);
-            }
-        }
-|#
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
