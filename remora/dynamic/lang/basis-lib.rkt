@@ -877,11 +877,22 @@
   (when (< (vector-length (rem-array-shape arr)) n-val)  (error "Trying to reduce more times than there are dimensions"))
   (cond [(zero? n-val) arr]
         [else
-         (define foo (remora ((rerank (0 0 1) R_reduce) op base arr)))
-         (remora (R_reduce-n op base foo (sub1 n)))]))
+         (define collapsed-one-layer (remora ((rerank (0 all 1) R_reduce) op base arr)))
+         (remora (R_reduce-n op base collapsed-one-layer (sub1 n)))]))
 ; reduces n times starting with the deep-most dimensions
 (define-primop (R_reduce-n [op all] [base all] [arr all] [n 0])
   (reduce-n op base arr n))
+
+(define (reduce-n-2 op base arr n)
+  (define n-val (vector-ref (rem-array-data n) 0))
+  (when (< (vector-length (rem-array-shape arr)) n-val)  (error "Trying to reduce more times than there are dimensions"))
+  (cond [(zero? n-val) arr]
+        [else
+         (define collapsed-one-layer (remora ((rerank (0 1 2) R_reduce) op base arr)))
+         (remora (R_reduce-n-2 op base collapsed-one-layer (sub1 n)))]))
+; reduces n times starting with the deep-most dimensions
+(define-primop (R_reduce-n-2 [op all] [base all] [arr all] [n 0])
+  (reduce-n-2 op base arr n))
 
 ;;; Extract a box's contents
 ;;; Applying this to an array of boxes risks producing result cells with
@@ -966,12 +977,11 @@
   (if (not (zero? (vector-count negative? idx-vec)))
       (error "One of the indices is negative, index: " idx)
       #f)
-
+  (define arr-shape (remora (R_shape-of arr)))
   (define split-at-idx (vector-length idx-vec))
-  (define index-shape (remora (R_take split-at-idx (R_shape-of arr))))
   (define res-shape (vector-drop shape-vec split-at-idx))
 
-  (define index-coef-vector (remora (R_reverse (R_scan * 1 (R_reverse (R_behead index-shape))))))
+  (define index-coef-vector (remora (R_take split-at-idx (R_reverse (R_scan * 1 (R_reverse (R_behead arr-shape)))))))
   (define res-size (foldr * 1 (vector->list res-shape)))
   (define index-of-elem (remora (R_reduce + 0 (* index-coef-vector idx))))
   (define res (vector-take (vector-drop (rem-array-data arr) (vector-ref (rem-array-data index-of-elem) 0))
@@ -1009,6 +1019,16 @@
   (vector-copy! arr-data index-of-elem new-val-data)
   (rem-array shape-vec arr-data))
 
+; produces a vector of numbers [start, end) with given step
+; negative step values are not supported
+; if start = end, then returns [start]
+(define-primop (R_range [start 0] [end 0] [step 0])
+  (define start-num (vector-ref (rem-array-data start) 0))
+  (define end-num (vector-ref (rem-array-data end) 0))
+  (cond [(< end-num start-num)      (remora (array))]
+        [(equal? end-num start-num) (remora (array start))]
+        [else                       (remora (+ start (* step (R_iota (array (exact-ceiling (/ (- end start) step)))))))]))
+
 
 (define (vector-flatten nest-vec)
   (cond [(not (vector? nest-vec)) nest-vec]
@@ -1043,15 +1063,38 @@
   (rem-array slice-size-vec (vector-flatten res-nested-vec)))
 
 
-(define (cart-product vectors)
-  (define cell-shape (vector-drop (rem-array-shape vectors) 1))
-  (define cells (array->cell-list vectors -1))
-  (define vector-num (length cells))
-  (cond [(zero? vector-num) vectors]
-        [(equal? vector-num 1) (remora (remora-apply (rerank (0) R_itemize) (car cells)))]
+
+; same as slice, but if the slice goes out of bound of arr (on any side, through origin being
+; negative or shape + origin > size of arr), the rest is filled with scalar values fill
+; returns an array of shape slice-shape
+(define-primop (R_slice/fill [arr all] [origin 1] [slice-shape 1] [fill 0])
+  (define filled-new-arr (remora (R_reshape slice-shape fill)))
+  (define old-arr-shape (remora (R_shape-of arr)))
+  (define max-of-2 (remora (fn ((a 0) (b 0)) (R_select (> a b) a b))))
+  (define min-of-2 (remora (fn ((a 0) (b 0)) (R_select (< a b) a b))))
+  (define old-arr-slice-origin (remora (max-of-2 ((fn ((_ 0)) 0) slice-shape) origin)))
+  (define old-arr-slice-end (remora (sub1 (min-of-2 (+ slice-shape origin) old-arr-shape))))
+  (define old-arr-slice-origin-list (R_array->nest-list old-arr-slice-origin))
+  (define old-arr-slice-end-list (R_array->nest-list old-arr-slice-end))
+  (define idx-ranges (remora (map (fn ((origin 0) (end 0)) (R_range origin (add1 end) 1))
+                                  old-arr-slice-origin-list
+                                  old-arr-slice-end-list)))
+  (define all-idx (remora (R_cartesian-product idx-ranges)))
+  ; there is prolly a better version of doing this, maybe using reduce, but good enough for now
+  (remora (R_foldr (fn ((idx 1) (new-arr all)) (R_array-set new-arr (- idx origin) (R_index arr idx)))
+                   filled-new-arr
+                   all-idx)))
+
+
+; vectors-scalar is a scalar rem array with a list of index ranges inside
+(define (cart-product vectors-scalar)
+  (define vectors (vector-ref (rem-array-data vectors-scalar) 0))
+  (define vector-num (length vectors))
+  (cond [(zero? vector-num) (remora (array))]
+        [(equal? vector-num 1) (remora (remora-apply (rerank (0) R_itemize) (car vectors)))]
         [else
-         (define itemized-head (remora (remora-apply (rerank (0) R_itemize) (car cells))))
-         (define cart-product-rest (cart-product (cell-list->array (cdr cells) (vector (sub1 vector-num)) cell-shape)))
+         (define itemized-head (remora (remora-apply (rerank (0) R_itemize) (car vectors))))
+         (define cart-product-rest (cart-product (scalar (cdr vectors))))
          (remora (def (append-to-rest (n 1)) ((rerank (1 1) R_append) n cart-product-rest)))
          (define array-res (append-to-rest itemized-head))
          (define formatted-res (array->cell-list array-res -2))
@@ -1060,8 +1103,8 @@
                            (vector vector-num))]))
 
 ; accept 2d-array where each row is an array of elements for cartesian product
-; [[1 2] [3 4] [5 6]] -> [[1 3 5] [1 3 6] [1 4 5] [1 4 6] [2 3 5] [2 3 6] [2 4 5] [2 4 6]]
-(define-primop (R_cartesian-product [vectors 2])
+; '([1 2] [3 4] [5 6]) -> [[1 3 5] [1 3 6] [1 4 5] [1 4 6] [2 3 5] [2 3 6] [2 4 5] [2 4 6]]
+(define-primop (R_cartesian-product [vectors 0])
   (cart-product vectors))
   
 (define-primop (R_select [bool 0] [a all] [b all])
