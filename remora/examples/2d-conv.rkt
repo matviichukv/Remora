@@ -648,15 +648,6 @@
   ; yolo-output-size = num-boxes * 5 + num-classes
   (def yolo-output (vector-to-yolo-output out8 num-boxes num-classes))
   (def yolo-truth (vector-to-yolo-output truth num-boxes num-classes))
-  #|
-  (def (detection-forward (input 1) (truth 1) (classes 0) (side 0) (n 0) (sqrt 0)
-                        (obj-scale 0) (noobj-scale 0) (coord-scale 0) (class-scale 0))
-(detection-forward [[(yolo-box 0.5 0.5 0.5 0.5 0.7) (yolo-box 0.5 0.5 0.5 0.5 0.7) 0.1 0.5 0.3 0.4 0.2]
-                    [(yolo-box 0.5 0.5 0.5 0.5 0.7) (yolo-box 0.5 0.5 0.5 0.5 0.7) 0.1 0.5 0.3 0.4 0.2]]
-                   [[(yolo-box 0.1 0.2 0.3 0.4 0.8) 1 0 0 0 0]
-                    [(yolo-box 0.1 0.2 0.3 0.4 0.8) 1 0 0 0 0]]
-                   5 1 2 #t 1 0.5 5 1)
-  |#
 
   (def-values (_idk delta) (detection-forward yolo-output yolo-truth num-classes side num-boxes #t 1 0.5 5 1))
 
