@@ -83,6 +83,7 @@
 ; when doing convolution for input (iota [4 4]) with w of size [2 2]
 ; stride 1: [[0 1] [4 5]] convolve with w; [[1 2] [5 6]] convolve with w
 ; stride 2: [[0 1] [4 5]] convolve with w; [[2 3] [6 7]] convolve with w
+; TODO: check that this works correctly as the middle layer
 (def (conv-layer-forward (input all) (w all) (b 1) (pad 0) (stride 0) (batch-normalize? 0))
   (define single-w-shape (drop 1 (shape-of w)))
   (define padded-input (tensor-pad input pad))
@@ -96,9 +97,10 @@
 
 (conv-layer-forward (iota [5 5]) [(iota [3 3])] [1] 0 1 #f)
 
-; w adn dy are all weights/filters (not a single one
+; w adn dy are all weights/filters
 ; this computes a backwards pass and returns deltas for w and input
 ; FIXME: does not currently work for stride other than 1
+; TODO: check that this works correctly as the middle layer
 (def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
   (def mid-net-conv-layer? (> (length (shape-of w)) (length (shape-of dy))))
   (print "mid net conv layer = ") (showln mid-net-conv-layer?)
@@ -132,10 +134,10 @@
     ; add a dimention to have the correct shape
     (#r(1 -1)reshape (append [additional-idx] (drop 1 (shape-of almost-correct-windows)))
                      almost-correct-windows)))
+  ; we need to do some manipulation here cause the computation is a bit different for entry vs mid net layers
   (def pad-dy-inputs ((select mid-net-conv-layer?
                        mid-net-dy-windows-compute
                        (fn () (#r(-1 1 0)get-windows pad-dy w-shape stride)))))
-  #;(def pad-dy-inputs (#r(-1 1 0)get-windows pad-dy w-shape stride))
   (print "shape-of pad-dy-inputs")
   (showln (shape-of pad-dy-inputs))
   (def w-replicated ((select mid-net-conv-layer?
@@ -496,7 +498,7 @@
   (def normalized-output (/ (- input mean-to-use) (sqrt (+ var-to-use 0.000001))))
   (values (+ normalized-output bias) input-mean input-var new-rolling-mean new-rolling-var))
 #;
-(def-values (batch-norm-out foo bar roll-mean roll-var)
+(def-values (batch-norm-out input-mean input-var roll-mean roll-var)
   (batch-norm-forward [[[2 6 1]
                         [1 5 0]
                         [2 9 7]]] [0] [0] [0] #t))
