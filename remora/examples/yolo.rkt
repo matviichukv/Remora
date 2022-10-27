@@ -65,8 +65,9 @@
 ; computes the variance over x, with mean being the mean of that same array.
 ; you pass in mean to save on this duplicate computation
 (def (variance (x all) (mean 0))
-  (/ (reduce-n + 0 (expt (- x mean) 2) (length (shape-of x)))
-     (num-elts x)))
+  (def diff-x (- x mean))
+  (/ (reduce-n + 0 (* diff-x diff-x) (length (shape-of x)))
+     (sub1 (num-elts x))))
 
 ; Convolutional layer
 ; weights are n+1 dims, n is number of dimensions in data, extra dim is for multiple filters
@@ -83,7 +84,6 @@
 ; when doing convolution for input (iota [4 4]) with w of size [2 2]
 ; stride 1: [[0 1] [4 5]] convolve with w; [[1 2] [5 6]] convolve with w
 ; stride 2: [[0 1] [4 5]] convolve with w; [[2 3] [6 7]] convolve with w
-; TODO: check that this works correctly as the middle layer
 (def (conv-layer-forward (input all) (w all) (b 1) (pad 0) (stride 0) (batch-normalize? 0))
   (define single-w-shape (drop 1 (shape-of w)))
   (define padded-input (tensor-pad input pad))
@@ -100,7 +100,6 @@
 ; w adn dy are all weights/filters
 ; this computes a backwards pass and returns deltas for w and input
 ; FIXME: does not currently work for stride other than 1
-; TODO: check that this works correctly as the middle layer
 (def (conv-layer-backward (dy all) (w all) (input all) (pad 0) (stride 0))
   (def mid-net-conv-layer? (> (length (shape-of w)) (length (shape-of dy))))
   (print "mid net conv layer = ") (showln mid-net-conv-layer?)
@@ -145,7 +144,7 @@
                              (fn () (#r(1 -1)reshape (drop 1 (shape-of pad-dy-inputs)) w)))))
   ;(def w-replicated (#r(1 -1)reshape (drop 1 (shape-of pad-dy-inputs)) w)) ; replicating w to have
   (def unfolded-dxp (* pad-dy-inputs w-replicated))
-  (def dxp (reduce + ((fn ((_ 0)) 0) (iota (shape-of input))) (reduce-n + 0 unfolded-dxp
+  (def dxp (reduce + ((fn ((_ 0)) 0) input) (reduce-n + 0 unfolded-dxp
                                                                         (select mid-net-conv-layer? (sub1 (length w-shape)) (length w-shape)))))
   
   (def db (reduce-n + 0 dy (length dy-shape)))
@@ -377,6 +376,10 @@
 ; rescore-flag is whether we should use iou vs 1 for calculating the confidence score (#t - use iou, #g - use 1
 ; returns a yolo-box that contains the deltas for each of the fields
 (def (best-yolo-box-delta (pred-box 0) (truth-box 0) (coord-scale 0) (obj-scale 0) (sqrt-flag 0) (rescore-flag 0))
+  (def pred-w)
+  (def pred-h)
+  (def truth-w)
+  (def truth-h)
   (def new-w (select sqrt-flag
                      (sqrt (- (yolo-box-w truth-box) (expt (yolo-box-w pred-box) 2)))
                      (- (yolo-box-w truth-box) (yolo-box-w pred-box))))
@@ -493,8 +496,10 @@
   (def new-rolling-var (+ (* 0.99 rolling-var) (* 0.01 input-var)))
   (def mean-to-use (select train input-mean rolling-mean))
   (def var-to-use  (select train input-var rolling-var))
-  (showln (- input mean-to-use)) 
-  (showln (+ (sqrt var-to-use) 0.000001)) 
+  (print "This is var to use ")(showln var-to-use)
+  (print "This is mean to use ")(showln mean-to-use)
+  #;(showln (- input mean-to-use)) 
+  #;(showln (+ (sqrt var-to-use) 0.000001)) 
   (def normalized-output (/ (- input mean-to-use) (sqrt (+ var-to-use 0.000001))))
   (values (+ normalized-output bias) input-mean input-var new-rolling-mean new-rolling-var))
 #;
@@ -553,10 +558,8 @@
   (def roll-mean2 (unsafe-unbox (index nn-data [7])))
   (def w6 (unsafe-unbox (index nn-data [8])))
   (def b6 (unsafe-unbox (index nn-data [9])))
-  (def w8 (unsafe-unbox (index nn-data [10])))
-  (def b8 (unsafe-unbox (index nn-data [11])))
-  (def roll-var8 (unsafe-unbox (index nn-data [12])))
-  (def roll-mean8 (unsafe-unbox (index nn-data [13])))
+  (def roll-var8 (unsafe-unbox (index nn-data [10])))
+  (def roll-mean8 (unsafe-unbox (index nn-data [11])))
   (println "starting the nn")
   ; na suffix is not activated
   (def out1-na (conv-layer-forward input w1 b1 0 1 #t))
@@ -594,41 +597,46 @@
   (showln (shape-of out5))
   (printf "time took so far: ~v\n" (- (current-seconds) start))
   (def out6-na (fc-layer-forward out5 w6 b6))
-  (def out6 (act-layer-forward out6-na leaky-relu))
+  (def-values (out6-norm out6-mean out6-var out6-roll-mean out6-roll-var)
+    (batch-norm-forward [out6-na] roll-mean8 roll-var8 [0] #t))
+  (def out6-unshape (act-layer-forward out6-norm leaky-relu))
+  (def out6 (reshape [side side (+ num-classes (* 5 num-boxes))] out6-unshape))
   (println "layer 6 done")
   (print "shape of out: ")
   (showln (shape-of out6))
   (printf "time took so far: ~v\n" (- (current-seconds) start))
-  (def-values (out7 out7-filter) (dropout-layer-forward out6 0.5 random-num-gen))
-  (println "layer 7 done")
-  (print "shape of out: ")
-  (showln (shape-of out7))
-  (printf "time took so far: ~v\n" (- (current-seconds) start))
-  (def out8-na (fc-layer-forward out7 w8 b8))
-  (print "out8-na")(showln out8-na)
+  ;(def-values (out7 out7-filter) (dropout-layer-forward out6 0.5 random-num-gen))
+  ;(println "layer 7 done")
+  ;(print "shape of out: ")
+  ;(showln (shape-of out7))
+  ;(printf "time took so far: ~v\n" (- (current-seconds) start))
+  ;(def out8-na (fc-layer-forward out7 w8 b8))
+  ;(print "out8-na")(showln out8-na)
   ; the norm layer here is a bit of a hack because we have a lot of numbers, so summing up even really
   ; small numbers a lot of time gives really big numbers (like 30k on one of the steps)
   ; should not be a problem once we have a full-scale YOLO since more conv layers will give the
   ; smaller number of values that's needed to avoid this problem
-  (def-values (out8-norm out8-mean out8-var out8-roll-mean out8-roll-var)
-    (batch-norm-forward (reshape [1 10] out8-na) roll-mean8 roll-var8 [0] #t))
-  (print "out: ")
-  (showln out8-norm)
-  (print "in: ")
-  (showln out7)
-  (def out8 (act-layer-forward (reshape [10] out8-norm) softmax))
-  (println "layer 8 done")
-  (print "shape of out: ")
-  (showln (shape-of out8))
-  (println "layer 8 out: ")
-  (showln out8)
-  (printf "time took so far: ~v\n" (- (current-seconds) start))
+  #;(def-values (out8-norm out8-mean out8-var out8-roll-mean out8-roll-var)
+    (batch-norm-forward (reshape [1 980] out8-na) roll-mean8 roll-var8 [0] #t))
+  ;(print "out: ")
+  ;(showln out8-norm)
+  ;(print "in: ")
+  ;(showln out7)
+  ;(def out8-unshape (act-layer-forward (reshape [980] out8-norm) softmax))
+  ;(def out8 (reshape [7 7 20] out8-unshape))
+  ;(println "layer 8 done")
+  ;(print "shape of out: ")
+  ;(showln (shape-of out8))
+  ;(println "layer 8 out: ")
+  ;(showln out8)
+  ;(printf "time took so far: ~v\n" (- (current-seconds) start))
 
   ; to deal with case where you have multiple cells, just reshape the output to [side side <yolo-output-size>]
   ; and apply the function to that result
   ; yolo-output-size = num-boxes * 5 + num-classes
-  (def yolo-output (vector-to-yolo-output out8 num-boxes num-classes))
-  (def yolo-truth (vector-to-yolo-output truth num-boxes num-classes))
+  (def yolo-output (vector-to-yolo-output out6 num-boxes num-classes))
+  ; there is always only 1 truth box
+  (def yolo-truth (vector-to-yolo-output truth 1 num-classes))
 
   ; constants here are copied from darknet
   (def-values (_idk delta) (detection-forward yolo-output yolo-truth num-classes side num-boxes #t 1 0.5 5 1))
@@ -636,16 +644,17 @@
   (print "the detection function delta: ")(showln delta)
   
   ; start-backprop
-  (def dout8-na (softmax-prime delta truth))
-  (def-values (dout8-norm _db8) (batch-norm-backward (reshape [1 10] dout8-na) (reshape [1 10] out8-na) out8-mean out8-var out8-roll-mean out8-roll-var #t))
-  (def-values (dout8 dw8 db8) (fc-layer-backward out7 (reshape [10] dout8-norm) w8))
-  (println "layer 8 back done")
-  (printf "time took so far: ~v\n" (- (current-seconds) start))
-  (def dout7 (dropout-layer-backward out7-filter dout8 0.5))
-  (println "layer 7 back done")
-  (printf "time took so far: ~v\n" (- (current-seconds) start))
-  (def dout6-na (act-layer-backward dout7 leaky-relu-prime))
-  (def-values (dout6 dw6 db6) (fc-layer-backward out5 dout6-na w6))
+  ;(def dout8-na (softmax-prime delta truth))
+  ;(def-values (dout8-norm _db8) (batch-norm-backward (reshape [1 980] dout8-na) (reshape [1 980] out8-na) out8-mean out8-var out8-roll-mean out8-roll-var #t))
+  ;(def-values (dout8 dw8 db8) (fc-layer-backward out7 (reshape [980] dout8-norm) w8))
+  ;(println "layer 8 back done")
+  ;(printf "time took so far: ~v\n" (- (current-seconds) start))
+  ;(def dout7 (dropout-layer-backward out7-filter dout8 0.5))
+  ;(println "layer 7 back done")
+  ;(printf "time took so far: ~v\n" (- (current-seconds) start))
+  (def dout6-na (act-layer-backward delta leaky-relu-prime))
+  (def-values (dout6-norm _) (batch-norm-backward (reshape [1 980] dout6-na) (reshape [1 980] out6-na) out6-mean out6-var out6-roll-mean out6-roll-var #t))
+  (def-values (dout6 dw6 db6) (fc-layer-backward out5 (reshape [980] dout6-norm) w6))
   (println "layer 6 back done")
   (printf "time took so far: ~v\n" (- (current-seconds) start))
   (def dout5 (flatten-layer-backward out4 dout6))
@@ -673,11 +682,11 @@
   (def new-b2 (- b2 (* learning-rate db2)))
   (def new-w5 (- w6 (* learning-rate dw6)))
   (def new-b5 (- b6 (* learning-rate db6)))
-  (def new-w8 (- w8 (* learning-rate dw8)))
-  (def new-b8 (- b8 (* learning-rate db8)))
+  ;(def new-w8 (- w8 (* learning-rate dw8)))
+  ;(def new-b8 (- b8 (* learning-rate db8)))
   [(box new-w1) (box new-b1) (box out1-roll-var) (box out1-roll-mean)
    (box new-w2) (box new-b2) (box out2-roll-var) (box out2-roll-mean)
-   (box new-w5) (box new-b5) (box new-w8) (box new-b8)])
+   (box new-w5) (box new-b5) (box out6-roll-var) (box out6-roll-mean)])
 
 
 (def random-gen (current-pseudo-random-generator))
@@ -690,21 +699,25 @@
               (box (generate-random-array [64] random-gen))
               (box ((fn ((_ 0)) 0) (iota [64])))
               (box ((fn ((_ 0)) 0) (iota [64])))
-              (box (generate-random-array [128 33856] random-gen))
-              (box (generate-random-array [128] random-gen))
-              (box (generate-random-array [10 128] random-gen))
-              (box (generate-random-array [10] random-gen))
+              (box (generate-random-array [980 33856] random-gen))
+              (box (generate-random-array [980] random-gen))
               (box ((fn ((_ 0)) 0) (iota [1])))
               (box ((fn ((_ 0)) 0) (iota [1])))])
 #;
 (def new-stuff (yolo-train init-nn
                            (generate-random-array [28 28] random-gen)
-                           [9.2 0.3 0.1 0.1 0.6 0 0 0 1 0]
-                           1
-                           5
-                           1
+                           (generate-random-array [7 7 15] random-gen)
+                           2
+                           10
+                           7
                            0.1
                            random-gen))
+
+(def norm-test [[83.3134520634073 60.74414105033068 67.51089560386406 31.859259523154698 21.925519094920713 53.0153303004775 74.9284863903013 85.678610233858 18.955245321311764 50.90593765220489]])
+(printf "Testing the batch norm layer: \n")
+(showln norm-test)
+(printf "This is the result of batch norm: \n")
+(batch-norm-forward norm-test [0] [0] [0] #t)
 (def end (current-seconds))
 
 
