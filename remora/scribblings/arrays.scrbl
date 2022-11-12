@@ -1,6 +1,6 @@
 #lang scribble/manual
 @require[(for-label (except-in racket/base
-                               box unbox define λ)
+                               box values unbox define λ)
                     (only-in remora/dynamic/lang/language
                              define λ)
                     remora/dynamic/main)]

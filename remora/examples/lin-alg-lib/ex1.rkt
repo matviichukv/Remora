@@ -5,9 +5,6 @@
 
 (dot-product [1 2] [3 4])
 
-(def (transpose (A all))
-  )
-
 (def (saxpy (y 1) (x 1) (a 0))
   (+ y (* x a)))
 
