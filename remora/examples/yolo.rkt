@@ -654,7 +654,7 @@
 
 
 (def random-gen (current-pseudo-random-generator))
-#;
+
 (def init-nn [(box (generate-random-array [32 3 3] random-gen))
               (box (generate-random-array [32] random-gen))
               (box ((fn ((_ 0)) 0) (iota [32])))
@@ -667,7 +667,7 @@
               (box (generate-random-array [980] random-gen))
               (box ((fn ((_ 0)) 0) (iota [1])))
               (box ((fn ((_ 0)) 0) (iota [1])))])
-#;
+
 (def new-stuff (yolo-train init-nn
                            (generate-random-array [28 28] random-gen)
                            (generate-random-array [7 7 15] random-gen)
