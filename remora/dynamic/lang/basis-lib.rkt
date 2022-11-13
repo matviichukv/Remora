@@ -2,6 +2,7 @@
 
 (require "semantics.rkt"
          "syntax.rkt"
+         "AD.rkt"
          racket/math
          racket/vector
          racket/list
@@ -22,6 +23,10 @@
 
 (define R_id (rem-array #() (vector (rem-scalar-proc (λ (x) x) 1))))
 
+(define R_+ (rem-array #() (vector (rem-scalar-proc (λ (x y) (d+ x y)) 2))))
+
+(define R_sqrt (rem-array #() (vector (rem-scalar-proc (λ (x) (dsqrt x)) 1)))) 
+
 (define R_and (rem-array #() (vector (rem-scalar-proc (λ (x y) (and x y)) 2))))
 (define R_or (rem-array #() (vector (rem-scalar-proc (λ (x y) (or x y)) 2))))
 
@@ -34,7 +39,8 @@
 (define (logb b x) (/ (log x) (log b)))
 (define R_logb (rem-array #() (vector (rem-scalar-proc logb 2))))
 (define R_ln (rem-array #() (vector (rem-scalar-proc log 1))))
-;(define R_log (rem-array #() (vector (rem-scalar-proc (λ (x) (logb 10 x)) 1))))
+#;
+(define R_log (rem-array #() (vector (rem-scalar-proc (λ (x) (dlog 10 x)) 1))))
 (define R_lg (rem-array #() (vector (rem-scalar-proc (λ (x) (logb 2 x)) 1))))
 
 (define R_bool->int
@@ -1106,7 +1112,7 @@
 ; '([1 2] [3 4] [5 6]) -> [[1 3 5] [1 3 6] [1 4 5] [1 4 6] [2 3 5] [2 3 6] [2 4 5] [2 4 6]]
 (define-primop (R_cartesian-product [vectors 0])
   (cart-product vectors))
-
+  
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
 (module+ test
