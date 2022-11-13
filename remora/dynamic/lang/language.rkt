@@ -49,7 +49,8 @@
                         #;(printf "got ~v from basis lib, providing ~v\n"
                                 name new-name)
                         new-name)
-                      "basis-lib.rkt"))
+                      (combine-in "AD.rkt" "basis-lib.rkt")))
+
 
 ;;; Take everything from racket/base that doesn't have the same name as a
 ;;; (prefix stripped) Remora primop or anything else from Remora's internals
@@ -63,7 +64,7 @@
                          #;(printf "got ~v from basis lib, providing ~v\n"
                                  name new-name)
                          new-name)
-                       "basis-lib.rkt")
+                       (combine-in "basis-lib.rkt" "AD.rkt"))
                       "syntax.rkt"
                       "semantics.rkt"))
 ;;; Prefix the reader's exports so they don't conflict with things from
@@ -75,6 +76,7 @@
 (provide (all-from-out "syntax.rkt"
                        "semantics.rkt"
                        "basis-lib.rkt"
+                       "AD.rkt"
                        "records.rkt")
          (rename-out [remora-module-begin #%module-begin]
                      [remora-top-interaction #%top-interaction])
@@ -89,13 +91,13 @@
                                      (if (regexp-match #rx"^R_" name)
                                          (regexp-replace #rx"^R_" name "")
                                          name))
-                                   (all-from-out "basis-lib.rkt")))
+                                   (all-from-out "basis-lib.rkt" "AD.rkt")))
                      (filtered-out
                       (λ (name)
                         (if (regexp-match #rx"^R_" name)
                             (regexp-replace #rx"^R_" name "")
                             name))
-                      (all-from-out "basis-lib.rkt"))
+                      (all-from-out "basis-lib.rkt" "AD.rkt"))
                      define λ struct
                      #%module-begin
                      #%top-interaction)
