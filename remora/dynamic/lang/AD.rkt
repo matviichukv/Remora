@@ -3,7 +3,8 @@
 ;;; A fork of https://github.com/qobi/R6RS-AD/blob/master/AD.ss
 
 (require "semantics.rkt"
-	 racket)
+	 racket/base
+         racket/vector)
 
 (provide d+
 	 d-
@@ -204,7 +205,7 @@
 (define dlog (lift-real->real log (lambda (x) (d/ x))))
 
 (define dexpt
- (lift-real*real->real expt
+ (lift-real*real->real (lambda (x y) (println "foo") (expt x y))
 		       (lambda (x1 x2) (d* x2 (dexpt x1 (d- x2 1))))
 		       (lambda (x1 x2) (d* (dlog x1) (dexpt x1 x2)))))
 
