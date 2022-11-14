@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require "semantics.rkt"
+(require "AD.rkt"
+	 "semantics.rkt"
          "syntax.rkt"
          racket/math
          racket/vector
@@ -1263,3 +1264,63 @@
 (define-primop (R_pair [new-car all] [new-cdr all]) (scalar (cons new-car new-cdr)))
 (define-primop (R_fst [pair 0]) (car (scalar->atom pair)))
 (define-primop (R_snd [pair 0]) (cdr (scalar->atom pair)))
+
+(define R_+
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d+ x y)) 2))))
+
+(define R_-
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d- x y)) 2))))
+
+(define R_*
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d* x y)) 2))))
+
+(define R_/
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d/ x y)) 2))))
+
+(define R_sqrt
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dsqrt x)) 1))))
+
+(define R_exp
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dexp x)) 1))))
+
+(define R_log
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dlog x)) 1))))
+
+(define R_expt
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dexpt x)) 1))))
+
+(define R_sin
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dsin x)) 1))))
+
+(define R_cos
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dcos x)) 1))))
+
+(define R_atan
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (datan x y)) 2))))
+
+(define R_=
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d= x y)) 2))))
+
+(define R_<
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d< x y)) 2))))
+
+(define R_>
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d> x y)) 2))))
+
+(define R_<=
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d<= x y)) 2))))
+
+(define R_>=
+ (rem-array #() (vector (rem-scalar-proc (lambda (x y) (d>= x y)) 2))))
+
+(define R_zero?
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dzero? x)) 1))))
+
+(define R_positive?
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dpositive? x)) 1))))
+
+(define R_negative
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dnegative? x)) 1))))
+
+(define R_real?
+ (rem-array #() (vector (rem-scalar-proc (lambda (x) (dreal? x)) 1))))

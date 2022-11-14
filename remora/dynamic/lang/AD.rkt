@@ -5,26 +5,26 @@
 (require "semantics.rkt"
 	 racket)
 
-(provide (rename-out (d+ +)
-		     (d- -)
-		     (d* *)
-		     (d/ /)
-		     (dsqrt sqrt)
-		     (dexp exp)
-		     (dlog log)
-		     (dexpt expt)
-		     (dsin sin)
-		     (dcos cos)
-		     (datan atan)
-		     (d= =)
-		     (d< <)
-		     (d> >)
-		     (d<= <=)
-		     (d>= >=)
-		     (dzero? zero?)
-		     (dpositive? positive?)
-		     (dnegative? negative?)
-		     (dreal? real?))
+(provide d+
+	 d-
+	 d*
+	 d/
+	 dsqrt
+	 dexp
+	 dlog
+	 dexpt
+	 dsin
+	 dcos
+	 datan
+	 d=
+	 d<
+	 d>
+	 d<=
+	 d>=
+	 dzero?
+	 dpositive?
+	 dnegative?
+	 dreal?
 	 R_j*
 	 R_*j)
 
@@ -438,6 +438,8 @@
    (set! *e* (- *e* 1))
    ;;\needswork: We don;t support returning both y and x-cotangent.
    x-cotangent)))
+
+(define R_sqrt (rem-proc dsqrt '(0)))
 
 (define R_j* (rem-proc forward-mode '(0 all all)))
 
