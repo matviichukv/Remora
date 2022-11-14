@@ -3,8 +3,7 @@
 ;;; A fork of https://github.com/qobi/R6RS-AD/blob/master/AD.ss
 
 (require "semantics.rkt"
-	 racket/base
-         racket/vector)
+	 racket)
 
 (provide d+
 	 d-
@@ -205,7 +204,7 @@
 (define dlog (lift-real->real log (lambda (x) (d/ x))))
 
 (define dexpt
- (lift-real*real->real (lambda (x y) (println "foo") (expt x y))
+ (lift-real*real->real expt
 		       (lambda (x1 x2) (d* x2 (dexpt x1 (d- x2 1))))
 		       (lambda (x1 x2) (d* (dlog x1) (dexpt x1 x2)))))
 
@@ -439,8 +438,6 @@
    (set! *e* (- *e* 1))
    ;;\needswork: We don;t support returning both y and x-cotangent.
    x-cotangent)))
-
-(define R_sqrt (rem-proc dsqrt '(0)))
 
 (define R_j* (rem-proc forward-mode '(0 all all)))
 
