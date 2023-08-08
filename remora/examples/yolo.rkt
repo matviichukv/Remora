@@ -277,6 +277,48 @@
 #;
 (def a-back (max-pool-layer-backward (iota [4 4]) ((fn ((_ 0)) 0.6) (iota [3 3])) b 1))
 
+#|
+
+; Max pooling layer
+; input is single input data 'frame'
+; Computes forward pass for max pooling layer
+; Takes a maximum value of all size-sized tensors (shape is size*size*size..., equal to rank of input)
+; e.g. input (iota [4 4]), stride 2, size 2, pad 0
+; output: [[5 7] [13 15]]
+(def (max-pool-layer-forward (input all) (stride 0) (size 0) (pad 0))
+  ; calc output
+  (def padded-input (tensor-pad input pad))
+  (def padded-input-shape (shape-of padded-input))
+  (def pool-shape ((fn ((_ 0)) size) padded-input-shape))
+  (def windows (get-windows padded-input pool-shape stride))
+  (def output (reduce-n max -inf.0 windows (length padded-input-shape)))
+  ; calc matrix for backprop
+  (def original-shape-output ((fn ((n 0)) (reshape pool-shape n)) output))
+  (def max-mask (select (equal? windows original-shape-output) 1 0))
+  (def count-per-max (reduce-n + 0 max-mask (length padded-input-shape)))
+  (def original-shape-counts ((fn ((n 0)) (reshape pool-shape n)) count-per-max))
+  (def mask-out (/ max-mask original-shape-counts))
+  (values output mask-out))
+
+(def (max-pool-layer-backward (input all) (mask-out all) (dy all) (pad 0) (size 0))
+  (def pool-shape ((fn ((_ 0)) size) (shape-of input)))
+  (show pool-shape) (printf "\n\n")
+  (def input-shape-dy ((fn ((n 0)) (reshape pool-shape n)) dy))
+  (show input-shape-dy)  (printf "\n\n")
+  (def unshaped-dx (* input-shape-dy mask-out))
+  (show unshaped-dx)  (printf "\n\n")
+  (def axis (iota [(length (shape-of mask-out))]))
+  (show axis)  (printf "\n\n")
+  (def transpose-axis (append (filter (even? axis) axis) (filter (odd? axis) axis)))
+  (show transpose-axis)  (printf "\n\n")
+  (reshape (shape-of input) (transpose unshaped-dx transpose-axis)))
+
+(def in ((fn ((_ 0)) 1) (iota [4 4 4])))
+(def-values (foo bar) (max-pool-layer-forward in 2 2 0))
+(max-pool-layer-backward in bar [[[1 -1] [2 -2]] [[3 -3] [4 -4]]] 2)
+
+|#
+
 ; Dropout layer
 ; rand-number-gen for consistent randomness during debugging
 ; prob - float 0 <= x <= 1, probability of leaving the number in (vs dropping and replacing with a 0)
@@ -654,7 +696,7 @@
 
 
 (def random-gen (current-pseudo-random-generator))
-
+#;
 (def init-nn [(box (generate-random-array [32 3 3] random-gen))
               (box (generate-random-array [32] random-gen))
               (box ((fn ((_ 0)) 0) (iota [32])))
@@ -667,7 +709,7 @@
               (box (generate-random-array [980] random-gen))
               (box ((fn ((_ 0)) 0) (iota [1])))
               (box ((fn ((_ 0)) 0) (iota [1])))])
-
+#;
 (def new-stuff (yolo-train init-nn
                            (generate-random-array [28 28] random-gen)
                            (generate-random-array [7 7 15] random-gen)

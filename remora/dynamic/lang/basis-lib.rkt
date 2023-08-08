@@ -382,6 +382,22 @@
 ;;; randomly permute a list
 (remora (def R_shuffle (fn ((xs all)) (R_deal (R_length xs) xs))))
 
+(define (permutations items)
+  (if (null? items) '(())
+      (apply append
+             (map (lambda (element)
+            (map (lambda (permutation)
+               (cons element permutation))
+             (permutations (remove element items))))
+          items))))
+
+(define-primop (R_permutations [arr 1])
+  (define len (vector-length (rem-array-data arr)))
+  (define perms (permutations (vector->list (rem-array-data arr))))
+  (define data (list->vector (flatten perms)))
+  (rem-array (vector (length perms) len)
+             data))
+
 ;;; Express a number in a given radix sequence
 ;;; TODO: permit +inf.0 so it can be used in outermost digit
 (define (antibase radix num)
@@ -686,6 +702,26 @@
                                (R_box (array (array 1 2 3)
                                              (array 4 5 6)
                                              (array 7 8 9)))))))
+
+; Axis is a permutation vector of numbers [0, n), where n is the rank of arr
+; it defines the new order of indices 
+(define-primop (R_transpose [arr all] [axis 1])
+  (define shape (rem-array-shape arr))
+  (define axis-list (vector->list (rem-array-data axis)))
+  (define new-shape (list->vector (map (lambda (idx) (vector-ref shape idx)) axis-list)))
+  (define old-indices-ranges (vector->list (vector-map (lambda (s) (rem-array (vector s) (list->vector (range 0 s)))) shape)))
+  (define old-indices-ranges-arr (rem-array (vector) (vector old-indices-ranges)))
+  (define old-indices (cart-product old-indices-ranges-arr))
+  (define new-indices (map (lambda (old-idx)
+                             (cell-list->array
+                              (map (lambda (get-index-from)
+                                    (R_index old-idx (rem-array (vector 1) (vector get-index-from))))
+                                  axis-list)
+                              (rem-array-shape old-idx)))
+                           (array->cell-list old-indices 1)))
+  (define new-data (list->vector (map (lambda (idx) (vector-ref (rem-array-data (R_index arr idx)) 0))
+                                      new-indices)))
+  (rem-array new-shape new-data))
 
 (define-primop (R_iota [shape 1])
   (define size (for/product ([d (rem-array-data shape)]) d))
@@ -1265,6 +1301,7 @@
                                           (list 'missing alternate)])))))))
 
 ;;; Construct and destruct pairs
+#|
 (define-primop (R_pair [new-car all] [new-cdr all]) (scalar (cons new-car new-cdr)))
 (define-primop (R_fst [pair 0]) (car (scalar->atom pair)))
 (define-primop (R_snd [pair 0]) (cdr (scalar->atom pair)))
@@ -1328,3 +1365,4 @@
 
 (define R_real?
  (rem-array #() (vector (rem-scalar-proc (lambda (x) (dreal? x)) 1))))
+|#
