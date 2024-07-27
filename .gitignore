@@ -4,3 +4,4 @@ remora/scribblings/*css
 remora/scribblings/*html
 remora/scribblings/*js
 remora/scribblings/*pdf
+*.bak
