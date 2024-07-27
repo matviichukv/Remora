@@ -1181,7 +1181,35 @@
                                       [array 7 8 9 10 6]
                                       [array 8 9 10 6 7]]])))
 
-
+; Obtains all windows of shape window-shape in input-arr, starting at (0, 0, ...)
+; Assumes stride of 1
+(define-primop (R_windows [input-arr all] [window-shape 1])
+  (define output-frame-shape (remora (add1 (- (R_shape-of input-arr)
+                                              window-shape))))
+  ;;; output-frame-shape gets converted into a list before applying range because
+  ;;; it may result in a jagged array in the case when dimensions are different
+  ;;; It is not an issue because after cartesian-product the output is uniform
+  (define output-frame-shape-list (R_array->nest-list output-frame-shape))
+  (define all-window-indicies (R_cartesian-product
+                               (remora (map (fn ((top 0)) (R_range 0 top 1))
+                                            output-frame-shape-list))))
+  (define all-windows-vec (R_slice input-arr
+                                   all-window-indicies
+                                   window-shape))
+  (R_reshape (R_append output-frame-shape window-shape)
+             all-windows-vec))
+(module+ test
+  (check-equal? (remora (R_windows (array (array 1 2) (array 3 4)) (array 2 2)))
+                (remora (array (array (array (array 1 2) (array 3 4))))))
+  (check-equal? (remora (R_windows (array (array 0 1 2) (array 3 4 5) (array 6 7 8)) (array 2 2)))
+                (remora (array (array (array (array 0 1)
+                                             (array 3 4))
+                                      (array (array 1 2)
+                                             (array 4 5)))
+                               (array (array (array 3 4)
+                                             (array 6 7))
+                                      (array (array 4 5)
+                                             (array 7 8)))))))
 
 ;;; Convert a Racket nested list into a Remora array
 (define-primop (R_list->array [lst 0])
