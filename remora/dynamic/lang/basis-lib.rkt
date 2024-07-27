@@ -1184,8 +1184,12 @@
 ; Obtains all windows of shape window-shape in input-arr, starting at (0, 0, ...)
 ; Assumes stride of 1
 (define-primop (R_windows [input-arr all] [window-shape 1])
-  (define output-frame-shape (remora (add1 (- (R_shape-of input-arr)
-                                              window-shape))))
+  (define input-shape (R_shape-of input-arr))
+  (define output-frame-shape
+    (cond [(equal? (vector-length (rem-array-data input-shape))
+                   (vector-length (rem-array-data window-shape)))
+           (remora (add1 (- input-shape window-shape)))]
+          [else (error 'R_windows "Input array shape and window shape must have the same rank.")]))
   ;;; output-frame-shape gets converted into a list before applying range because
   ;;; it may result in a jagged array in the case when dimensions are different
   ;;; It is not an issue because after cartesian-product the output is uniform
