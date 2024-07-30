@@ -131,6 +131,7 @@
                    (vector-take (rem-array-data arr)
                                 (* (for/product ([d cell-shape]) d)
                                    (scalar->atom n)))))
+
 (module+ test
   (check-equal?
    (remora (R_take 2 (alit (3 3) 0 1 2 3 4 5 6 7 8)))
@@ -778,12 +779,14 @@
                                (array 1 9)
                                (array 8 2)))))
 
+
 (define (list-nub-sieve xs [already-seen '()])
   (cond [(empty? xs) '()]
         [(member (first xs) already-seen)
          (cons #f (list-nub-sieve (rest xs) already-seen))]
         [else (cons #t (list-nub-sieve (rest xs)
                                        (cons (first xs) already-seen)))]))
+
 (define-primop (R_nub-sieve [arr all])
   (define cells
     (list-nub-sieve (array->cell-list arr -1)))
@@ -1071,6 +1074,26 @@
         [else                       (remora (+ start (* step (R_iota (array (exact-ceiling (/ (- end start) step)))))))]))
 
 
+(define (list-range-sieve full-range target-range)
+  (cond [(vector-empty? full-range) '()]
+        [(vector-empty? target-range) (cons #f (list-range-sieve (vector-drop full-range 1) target-range))]
+        [(equal? (vector-ref full-range 0) (vector-ref target-range 0))
+         (cons #t (list-range-sieve (vector-drop full-range 1) (vector-drop target-range 1)))]
+        [else (cons #f (list-range-sieve (vector-drop full-range 1) target-range))]))
+
+; Produces a boolean vector of length len where #t occurs with a given offset and stride
+; All other values are #f
+; Can be used as a sieve for R_filter
+(define-primop (R_range-sieve [len 0] [offset 0] [stride 0])
+  (define full-range (rem-array-data (remora (R_range 0 len 1))))
+  (define target-range (rem-array-data (R_range offset len stride)))
+  (define sieve-cells
+    (list-range-sieve full-range target-range))
+  (rem-array (vector (length sieve-cells))
+             (list->vector sieve-cells)))
+
+
+
 (define (vector-flatten nest-vec)
   (cond [(not (vector? nest-vec)) nest-vec]
         [(vector-empty? nest-vec) nest-vec]
@@ -1102,7 +1125,6 @@
   (define nested-vec-arr (array->nest-vector arr))
   (define res-nested-vec (dimensional-slice nested-vec-arr offset-vec slice-size-vec))
   (rem-array slice-size-vec (vector-flatten res-nested-vec)))
-
 
 
 ; same as slice, but if the slice goes out of bound of arr (on any side, through origin being
@@ -1186,8 +1208,8 @@
 (define-primop (R_windows [input-arr all] [window-shape 1])
   (define input-shape (R_shape-of input-arr))
   (define output-frame-shape
-    (cond [(equal? (vector-length (rem-array-data input-shape))
-                   (vector-length (rem-array-data window-shape)))
+    (cond [(equal? (R_length input-shape)
+                   (R_length window-shape))
            (remora (add1 (- input-shape window-shape)))]
           [else (error 'R_windows "Input array shape and window shape must have the same rank.")]))
   ;;; output-frame-shape gets converted into a list before applying range because
