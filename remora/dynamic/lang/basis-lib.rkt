@@ -897,7 +897,6 @@
   (check-equal? (remora (R_foldl (array + -) 0 (array 1 2 3 4)))
                 (remora (array 10 -10))))
 
-
 ;;; reduce a vector (not list!) of Remora arrays using a Remora function array
 ;;; note: reduce assumes associativity and has no "base" value
 (define (rem-reduce op base arrays)
@@ -1042,8 +1041,6 @@
   (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array -1)))))
   (check-exn exn:fail? (lambda () (remora (R_index (array 1 2 3) (array 3))))))
 
-
-
 (define-primop (R_array-set [arr all] [idx 1] [new-val all])
   (define shape-vec (rem-array-shape arr))
   (define idx-vec (rem-array-data idx))
@@ -1074,25 +1071,57 @@
         [else                       (remora (+ start (* step (R_iota (array (exact-ceiling (/ (- end start) step)))))))]))
 
 
-(define (list-range-sieve full-range target-range)
-  (cond [(vector-empty? full-range) '()]
-        [(vector-empty? target-range) (cons #f (list-range-sieve (vector-drop full-range 1) target-range))]
-        [(equal? (vector-ref full-range 0) (vector-ref target-range 0))
-         (cons #t (list-range-sieve (vector-drop full-range 1) (vector-drop target-range 1)))]
-        [else (cons #f (list-range-sieve (vector-drop full-range 1) target-range))]))
+; Vector comprehension for subsampling elements
+(define (for/vector-subsample vec offset stride)
+  (define dim (vector-length vec))
+  (for/vector ([i (range dim)]
+               [v vec]
+               #:when (and (>= i offset)
+                           (equal? 0 (modulo (- i offset) stride)))) v))
 
-; Produces a boolean vector of length len where #t occurs with a given offset and stride
-; All other values are #f
-; Can be used as a sieve for R_filter
-(define-primop (R_range-sieve [len 0] [offset 0] [stride 0])
-  (define full-range (rem-array-data (remora (R_range 0 len 1))))
-  (define target-range (rem-array-data (R_range offset len stride)))
-  (define sieve-cells
-    (list-range-sieve full-range target-range))
-  (rem-array (vector (length sieve-cells))
-             (list->vector sieve-cells)))
+; Recursive function for subsampling elements
+; Precondition 1: arr-nest-vec is not a scalar
+; Precondition 2: length offset-vec = length stride-vec = rank arr > 0
+(define (dimensional-subsample arr-nest-vec offset-vec stride-vec)
+  (define offset-head (vector-ref offset-vec 0))
+  (define stride-head (vector-ref stride-vec 0))
+  (cond [(equal? 1 (vector-length offset-vec))
+         (let ([sampled-vec (for/vector-subsample arr-nest-vec offset-head stride-head)])
+           (rem-array (vector (vector-length sampled-vec)) sampled-vec))]
+        [else (let ([rec-sampled-vec
+                     (vector-map
+                      (lambda (cell) (dimensional-subsample cell (vector-drop offset-vec 1) (vector-drop stride-vec 1)))
+                      (for/vector-subsample arr-nest-vec offset-head stride-head))])
+                (cell-list->array (vector->list rec-sampled-vec)
+                                  (vector (vector-length rec-sampled-vec))))]))
 
+; Produces a subsample of the original array arr as specified by the offset and stride vectors
+; Operates on non-scalar arr
+; Length of offset and stride must be the same as arr rank 
+(define-primop (R_subsample [arr all] [offset 1] [stride 1])
+  (define shape-vec (rem-array-shape arr))
+  (define offset-vec (rem-array-data offset))
+  (define stride-vec (rem-array-data stride))
+  ; These checks assert all precondtitions necessary for dimenstional-subsample
+  (when (equal? 0 (vector-length shape-vec))
+    (error "Cannot subsample a scalar"))
+  (unless (equal? (vector-length shape-vec) (vector-length offset-vec))
+    (error "Offset vector has to have the same length as array rank"))
+  (unless (equal? (vector-length shape-vec) (vector-length stride-vec))
+    (error "Stride vector has to have the same length as array rank"))
+  (define arr-nest-vec (array->nest-vector arr))
+  
+  (dimensional-subsample arr-nest-vec offset-vec stride-vec))
 
+(module+ test
+  (check-equal? (remora (R_subsample (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                                     (array 0 1)
+                                     (array 2 2)))
+                (remora (array (array 1 3) (array 9 11))))
+  (check-equal? (remora (R_subsample (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                                     (array 1 2)
+                                     (array 1 1)))
+                (remora (array (array 6 7) (array 10 11) (array 14 15)))))
 
 (define (vector-flatten nest-vec)
   (cond [(not (vector? nest-vec)) nest-vec]
