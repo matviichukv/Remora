@@ -1139,38 +1139,38 @@
                                                     (lambda (cell) (dimensional-slice cell (vector-drop offset-vec 1) (vector-drop size-vec 1)))
                                                     (vector-take (vector-drop nest-vec (vector-ref offset-vec 0)) (vector-ref size-vec 0)))]))
 
-; arr - array to take a slice from
-; offset - offset of the slice, number of elements has to be the same as rank
-; slice-size - size of each slice's dimesion, number of elements has to be the same as rank.
-; Throws an error if offset + slice-size is larger than corresponding dimensions
-(define-primop (R_slice [arr all] [offset 1] [slice-size 1])
+; arr - array to take a subarray from
+; offset - offset of the subarray, number of elements has to be the same as rank
+; subarray-size - size of each subarray's dimesion, number of elements has to be the same as rank.
+; Throws an error if offset + subarray-size is larger than corresponding dimensions
+(define-primop (R_subarray [arr all] [offset 1] [subarray-size 1])
   (define shape-vec (rem-array-shape arr))
   (define offset-vec (rem-array-data offset))
-  (define slice-size-vec (rem-array-data slice-size))
+  (define subarray-size-vec (rem-array-data subarray-size))
   (when (< (vector-length shape-vec) (vector-length offset-vec))
     (error "Offset has the wrong length"))
-  (when (< (vector-length shape-vec) (vector-length slice-size-vec))
-    (error "Slice size has the wrong length"))
+  (when (< (vector-length shape-vec) (vector-length subarray-size-vec))
+    (error "Subarray size has the wrong length"))
   (define nested-vec-arr (array->nest-vector arr))
-  (define res-nested-vec (dimensional-slice nested-vec-arr offset-vec slice-size-vec))
-  (rem-array slice-size-vec (vector-flatten res-nested-vec)))
+  (define res-nested-vec (dimensional-slice nested-vec-arr offset-vec subarray-size-vec))
+  (rem-array subarray-size-vec (vector-flatten res-nested-vec)))
 
 
-; same as slice, but if the slice goes out of bound of arr (on any side, through origin being
+; same as subarray, but if the subarray goes out of bound of arr (on any side, through origin being
 ; negative or shape + origin > size of arr), the rest is filled with scalar values fill
-; returns an array of shape slice-shape
-(define-primop (R_slice/fill [arr all] [origin 1] [slice-shape 1] [fill 0])
-  (define filled-new-arr (remora (R_reshape slice-shape fill)))
+; returns an array of shape subarray-shape
+(define-primop (R_subarray/fill [arr all] [origin 1] [subarray-shape 1] [fill 0])
+  (define filled-new-arr (remora (R_reshape subarray-shape fill)))
   (define old-arr-shape (remora (R_shape-of arr)))
   (define max-of-2 (remora (fn ((a 0) (b 0)) (R_select (> a b) a b))))
   (define min-of-2 (remora (fn ((a 0) (b 0)) (R_select (< a b) a b))))
-  (define old-arr-slice-origin (remora (max-of-2 ((fn ((_ 0)) 0) slice-shape) origin)))
-  (define old-arr-slice-end (remora (sub1 (min-of-2 (+ slice-shape origin) old-arr-shape))))
-  (define old-arr-slice-origin-list (R_array->nest-list old-arr-slice-origin))
-  (define old-arr-slice-end-list (R_array->nest-list old-arr-slice-end))
+  (define old-arr-subarray-origin (remora (max-of-2 ((fn ((_ 0)) 0) subarray-shape) origin)))
+  (define old-arr-subarray-end (remora (sub1 (min-of-2 (+ subarray-shape origin) old-arr-shape))))
+  (define old-arr-subarray-origin-list (R_array->nest-list old-arr-subarray-origin))
+  (define old-arr-subarray-end-list (R_array->nest-list old-arr-subarray-end))
   (define idx-ranges (remora (map (fn ((origin 0) (end 0)) (R_range origin (add1 end) 1))
-                                  old-arr-slice-origin-list
-                                  old-arr-slice-end-list)))
+                                  old-arr-subarray-origin-list
+                                  old-arr-subarray-end-list)))
   (define all-idx (remora (R_cartesian-product idx-ranges)))
   ; there is prolly a better version of doing this, maybe using reduce, but good enough for now
   (remora (R_foldr (fn ((idx 1) (new-arr all)) (R_array-set new-arr (- idx origin) (R_index arr idx)))
@@ -1248,7 +1248,7 @@
   (define all-window-indicies (R_cartesian-product
                                (remora (map (fn ((top 0)) (R_range 0 top 1))
                                             output-frame-shape-list))))
-  (define all-windows-vec (R_slice input-arr
+  (define all-windows-vec (R_subarray input-arr
                                    all-window-indicies
                                    window-shape))
   (R_reshape (R_append output-frame-shape window-shape)
