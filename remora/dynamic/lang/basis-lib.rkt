@@ -1199,6 +1199,24 @@
 (define-primop (R_cartesian-product [vectors 0])
   (cart-product vectors))
 
+; Given a shape vector, returns 2D arr of all valid 1D coordinate vectors in an array with that shape
+; The elements are ordered, so output array can be easily shaped into a rem array of given shape
+(define (indicies-from-shape shape-vec)
+  (define shape-list (vector->list shape-vec))
+  (define idx-ranges (for/list ([dim shape-list])
+                       (remora (R_range 0 dim 1))))
+  (remora (R_cartesian-product idx-ranges)))
+
+; Given arr of rank r, returns array of rank r+1, which can be seen an r-rank array of vectors
+; Each of these vectors is its location in the containing array
+(define-primop (R_indicies-of [arr all])
+  (define shape-vec (rem-array-shape arr))
+  (define all-indicies (indicies-from-shape shape-vec))
+  (define shape-list (vector->list shape-vec))
+  (define extended-shape-list (append shape-list (list (length shape-list))))
+  (remora (R_reshape (list->array extended-shape-list)
+                     all-indicies)))
+
 (define-primop (R_select [bool 0] [a all] [b all])
   (if (scalar->atom bool) a b))
 (module+ test
