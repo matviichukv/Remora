@@ -593,15 +593,15 @@
   (check-equal? (remora (R_base (alit (4) 7 24 60 60) (alit (3) 1 11 12)))
                 (remora (alit () 4272))))
 
+;; N-dimensional rotate, takes arr and a vector of rotations for each dimension of arr
+;; Length of shift-arr is at most rank of arr
+;; Returns rotated arr
 (define-primop (R_rotate [arr all] [shift 0])
   (define cells (array->cell-list arr -1))
-  (define shift-atom (vector-ref (rem-array-data shift) 0))
-  (define actual-shift
-    (cond [(equal? 0 shift-atom) 0]
-          [(negative? shift-atom) (modulo shift-atom (length cells))]
-          [else (modulo shift-atom (length cells))]))
-  (cell-list->array (append (drop cells actual-shift)
-                            (take cells actual-shift))
+  (define shift-atom (modulo (vector-ref (rem-array-data shift) 0)
+                             (length cells)))
+  (cell-list->array (append (drop cells shift-atom)
+                            (take cells shift-atom))
                     (vector (length cells))
                     (vector-drop (rem-array-shape arr) 1)))
 (module+ test
@@ -628,6 +628,60 @@
                                (array 1 2 3 4 5 0)
                                (array 2 3 4 5 0 1)
                                (array 3 4 5 0 1 2)))))
+
+; Assumes that the length of shift-dims-vec is non-zero
+(define (dimensional-rotate nest-vec shift-dims-vec)
+  (define shift-atom (modulo (vector-ref shift-dims-vec 0)
+                             (vector-length nest-vec)))
+  (cond [(equal? 1 (vector-length shift-dims-vec))
+         (vector-append (vector-drop nest-vec shift-atom)
+                        (vector-take nest-vec shift-atom))]
+        [else
+         (vector-map (lambda (cell) (dimensional-rotate cell
+                                                        (vector-drop shift-dims-vec 1)))
+                     (vector-append (vector-drop nest-vec shift-atom)
+                                    (vector-take nest-vec shift-atom)))]))
+
+;; N-dimensional rotate, takes arr and a vector of rotations for first n dimensions of arr
+;; Length of shift-dims is at most rank of arr
+;; Returns rotated arr
+(define-primop (R_rotate-n-dim [arr all] [shift-dims 1])
+  (define shape-vec (rem-array-shape arr))
+  (define shift-dims-vec (rem-array-data shift-dims))
+  (when (< (vector-length shape-vec) (vector-length shift-dims-vec))
+    (error "Too many shift dimensions, greater than array rank"))
+  (define nested-vec-arr (array->nest-vector arr))
+  (if (zero? (vector-length shift-dims-vec))
+      arr
+      (rem-array shape-vec
+                 (vector-flatten (dimensional-rotate nested-vec-arr shift-dims-vec)))))
+
+(module+ test
+  (check-equal? (remora (R_rotate-n-dim (array 1 2 3 4 5) (array 1)))
+                (remora (array 2 3 4 5 1)))
+  (check-equal? (remora (R_rotate-n-dim (array 1 2 3 4 5) (array -1)))
+                (remora (array 5 1 2 3 4)))
+  (check-equal? (remora (R_rotate-n-dim (array (array 0 1)
+                                               (array 2 3)
+                                               (array 4 5))
+                                  (array 1)))
+                (remora (array (array 2 3)
+                               (array 4 5)
+                               (array 0 1))))
+  (check-equal? (remora (R_rotate-n-dim (array (array 0 1)
+                                               (array 2 3)
+                                               (array 4 5))
+                                  (array -1 1)))
+                (remora (array (array 5 4)
+                               (array 1 0)
+                               (array 3 2))))
+  (check-equal? (remora ((rerank (1 1) R_rotate-n-dim) (array (array 0 1)
+                                                              (array 2 3)
+                                                              (array 4 5))
+                                  (array 1)))
+                (remora (array (array 1 0)
+                               (array 3 2)
+                               (array 5 4)))))
 
 (define-primop (R_shape-of [arr all])
   (rem-array (vector (vector-length (rem-array-shape arr)))
@@ -1155,9 +1209,9 @@
   (when (zero? (vector-length shape-vec))
     (error "Cannot take a subarray of a scalar"))
   (unless (eq? (vector-length shape-vec) (vector-length offset-vec))
-    (error "Offset rank isn't equal to array rank"))
+    (error "Offset length isn't equal to array rank"))
   (unless (eq? (vector-length shape-vec) (vector-length subarray-shape-vec))
-    (error "Subarray shape rank isn't equal to array rank"))
+    (error "Subarray shape length isn't equal to array rank"))
   (unless (zero? (vector-count
                   (lambda (arr-dim offset subarr-dim)
                     (or (< offset 0)
@@ -1224,9 +1278,9 @@
   (when (zero? (vector-length shape-vec))
     (error "Cannot take a subarray of a scalar"))
   (unless (eq? (vector-length shape-vec) (vector-length offset-vec))
-    (error "Offset rank isn't equal to array rank"))
+    (error "Offset length isn't equal to array rank"))
   (unless (eq? (vector-length shape-vec) (vector-length subarray-shape-vec))
-    (error "Subarray shape rank isn't equal to array rank"))
+    (error "Subarray shape length isn't equal to array rank"))
   (define nested-vec-arr (array->nest-vector arr))
   (define res-nested-vec (dimensional-subarray/fill
                           nested-vec-arr shape-vec
