@@ -1124,14 +1124,15 @@
                 (remora (array (array 6 7) (array 10 11) (array 14 15)))))
 
 (define (vector-flatten nest-vec)
-  (cond [(not (vector? nest-vec)) nest-vec]
+  (cond [(not (vector? nest-vec)) (vector nest-vec)]
         [(vector-empty? nest-vec) nest-vec]
-        [(vector? (vector-ref nest-vec 0)) (apply vector-append (vector->list (vector-map vector-flatten nest-vec)))]
+        [(vector? nest-vec)
+         (apply vector-append (vector->list (vector-map vector-flatten nest-vec)))]
         [else nest-vec]))
 
 ;; SUBARRAYS
 
-; Assumes that the lengths of offset and size vectors are non-zero and equal
+; Assumes that the lengths of offset and shape vectors are non-zero and equal
 (define (dimensional-subarray nest-vec offset-vec shape-vec)
   (cond [(equal? 1 (vector-length offset-vec))
          (vector-take (vector-drop nest-vec (vector-ref offset-vec 0))
@@ -1179,35 +1180,90 @@
                                     (array 3 2)))
                 (remora (array (array 6 7) (array 10 11) (array 14 15)))))
 
+; Assumes that the lengths of offset and shape vectors are non-zero and equal
+; Every argument is a vector, except fill, which is a scalar val
+(define (dimensional-subarray/fill arr-nested-vec arr-shape-vec
+                                   offset-vec sarr-shape-vec fill)
+  (define arr-dim (vector-ref arr-shape-vec 0))
+  (define subcell-atom-count
+    (foldl * 1 (vector->list (vector-drop sarr-shape-vec 1))))
+  (define sarr-dim (vector-ref sarr-shape-vec 0))
+  (define offset (vector-ref offset-vec 0))
+  (define pos-offset (max offset 0))
+  (define valid-offset (min pos-offset arr-dim))    ;; Offset within bounds
+  (define valid-sarr-dim (max 0                     ;; Subarray dimension within bounds
+    (- (min arr-dim (+ sarr-dim offset))  ; right end of overlap interval
+       pos-offset)))                      ; left end of overlap interval
+  (define neg-overhang (* -1 (min offset 0)))
+  (define pos-overhang (max 0 (- sarr-dim (+ neg-overhang valid-sarr-dim))))
+  (cond [(equal? 1 (vector-length offset-vec))
+         (vector-append (make-vector neg-overhang fill)
+                        (vector-take (vector-drop arr-nested-vec valid-offset)
+                                     valid-sarr-dim)
+                        (make-vector pos-overhang fill))]
+        [else
+         (vector-append (make-vector (* neg-overhang subcell-atom-count) fill)
+                        (vector-map (lambda (cell)
+                                      (dimensional-subarray/fill
+                                       cell
+                                       (vector-drop arr-shape-vec 1)
+                                       (vector-drop offset-vec 1)
+                                       (vector-drop sarr-shape-vec 1)
+                                       fill))
+                                    (vector-take (vector-drop arr-nested-vec valid-offset)
+                                                 valid-sarr-dim))
+                        (make-vector (* pos-overhang subcell-atom-count) fill))]))
+
 ; same as subarray, but if the subarray goes out of bound of arr (on any side, through origin being
 ; negative or shape + offset > size of arr), the rest is filled with scalar values fill
 ; returns an array of shape subarray-shape
 (define-primop (R_subarray/fill [arr all] [offset 1] [subarray-shape 1] [fill 0])
-  (define out-arr (remora (R_reshape subarray-shape fill)))
-  (define arr-shape-list (vector->list (rem-array-shape arr)))
-  (define offset-list (vector->list (rem-array-data offset)))
-  (define subarr-shape-list (vector->list (rem-array-data subarray-shape)))
-  (unless (eq? (length arr-shape-list) (length offset-list))
+  (define shape-vec (rem-array-shape arr))
+  (define offset-vec (rem-array-data offset))
+  (define subarray-shape-vec (rem-array-data subarray-shape))
+  (when (zero? (vector-length shape-vec))
+    (error "Cannot take a subarray of a scalar"))
+  (unless (eq? (vector-length shape-vec) (vector-length offset-vec))
     (error "Offset rank isn't equal to array rank"))
-  (unless (eq? (length arr-shape-list) (length subarr-shape-list))
+  (unless (eq? (vector-length shape-vec) (vector-length subarray-shape-vec))
     (error "Subarray shape rank isn't equal to array rank"))
-  (define overlap-shape
-    (map (lambda (arr-dim offset subarr-dim)
-           (- (min arr-dim (+ subarr-dim offset))    ;; right end of overlap interval
-              (max 0 offset)))                       ;; left end of overlap interval
-         arr-shape-list
-         offset-list
-         subarr-shape-list))
-  (define pos-offset (list->array (map (lambda (i) (max i 0)) offset-list)))
-  (define neg-offset (list->array (map (lambda (i) (min i 0)) offset-list)))
-  (if (ormap (lambda (dim) (<= dim 0)) overlap-shape) ;; if there is no overlap, return init arr
-      out-arr
-      (remora (R_foldr (fn ((idx 1) (new-arr all))
-                            (R_array-set new-arr
-                                         (- idx neg-offset)   ;; shift to account for left overhang
-                                         (R_index arr (+ idx pos-offset))))
-                        out-arr
-                        (indicies-from-shape (list->vector overlap-shape))))))
+  (define nested-vec-arr (array->nest-vector arr))
+  (define res-nested-vec (dimensional-subarray/fill
+                          nested-vec-arr shape-vec
+                          offset-vec subarray-shape-vec fill))
+  (rem-array subarray-shape-vec (vector-flatten res-nested-vec)))
+
+(module+ test
+  (check-equal? (remora (R_subarray/fill
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array 0 1)
+                         (array 2 2)
+                         413))
+                (remora (array (array 1 2)
+                               (array 5 6))))
+  (check-equal? (remora (R_subarray/fill
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array -1 -2)
+                         (array 2 4)
+                         413))
+                (remora (array (array 413 413 413 413)
+                               (array 413 413 0 1))))
+  (check-equal? (remora (R_subarray/fill
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array 3 2)
+                         (array 2 4)
+                         413))
+                (remora (array (array 14 15 413 413)
+                               (array 413 413 413 413))))
+  (check-equal? (remora (R_subarray/fill
+                         (alit (2 2) 0 1 2 3)
+                         (array -1 -1)
+                         (array 4 4)
+                         413))
+                (remora (array (array 413 413 413 413)
+                               (array 413 0 1 413)
+                               (array 413 2 3 413)
+                               (array 413 413 413 413)))))
 
 ; vectors-scalar is a scalar rem array with a list of index ranges inside
 (define (cart-product vectors-scalar)
