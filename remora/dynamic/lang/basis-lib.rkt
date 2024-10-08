@@ -1129,54 +1129,85 @@
         [(vector? (vector-ref nest-vec 0)) (apply vector-append (vector->list (vector-map vector-flatten nest-vec)))]
         [else nest-vec]))
 
-(define (dimensional-slice nest-vec offset-vec size-vec)
-  (define offset-len (vector-length offset-vec))
-  (define size-len (vector-length size-vec))
-  (cond [(and (zero? offset-len) (zero? size-vec)) (error "")]
-        [(not (equal? offset-len size-len))        (error "offset and size have different sizes")]
-        [(equal? 1 offset-len)                     (vector-take (vector-drop nest-vec (vector-ref offset-vec 0)) (vector-ref size-vec 0))]
-        [else                                      (vector-map
-                                                    (lambda (cell) (dimensional-slice cell (vector-drop offset-vec 1) (vector-drop size-vec 1)))
-                                                    (vector-take (vector-drop nest-vec (vector-ref offset-vec 0)) (vector-ref size-vec 0)))]))
+;; SUBARRAYS
+
+; Assumes that the lengths of offset and size vectors are non-zero and equal
+(define (dimensional-subarray nest-vec offset-vec shape-vec)
+  (cond [(equal? 1 (vector-length offset-vec))
+         (vector-take (vector-drop nest-vec (vector-ref offset-vec 0))
+                      (vector-ref shape-vec 0))]
+        [else
+         (vector-map (lambda (cell) (dimensional-subarray cell
+                                                          (vector-drop offset-vec 1)
+                                                          (vector-drop shape-vec 1)))
+                     (vector-take (vector-drop nest-vec (vector-ref offset-vec 0))
+                                  (vector-ref shape-vec 0)))]))
 
 ; arr - array to take a subarray from
 ; offset - offset of the subarray, number of elements has to be the same as rank
-; subarray-size - size of each subarray's dimesion, number of elements has to be the same as rank.
+; subarray-shape - size of each subarray's dimesion, number of elements has to be the same as rank.
 ; Throws an error if offset + subarray-size is larger than corresponding dimensions
-(define-primop (R_subarray [arr all] [offset 1] [subarray-size 1])
+(define-primop (R_subarray [arr all] [offset 1] [subarray-shape 1])
   (define shape-vec (rem-array-shape arr))
   (define offset-vec (rem-array-data offset))
-  (define subarray-size-vec (rem-array-data subarray-size))
-  (when (< (vector-length shape-vec) (vector-length offset-vec))
-    (error "Offset has the wrong length"))
-  (when (< (vector-length shape-vec) (vector-length subarray-size-vec))
-    (error "Subarray size has the wrong length"))
+  (define subarray-shape-vec (rem-array-data subarray-shape))
+  (when (zero? (vector-length shape-vec))
+    (error "Cannot take a subarray of a scalar"))
+  (unless (eq? (vector-length shape-vec) (vector-length offset-vec))
+    (error "Offset rank isn't equal to array rank"))
+  (unless (eq? (vector-length shape-vec) (vector-length subarray-shape-vec))
+    (error "Subarray shape rank isn't equal to array rank"))
+  (unless (zero? (vector-count
+                  (lambda (arr-dim offset subarr-dim)
+                    (or (< offset 0)
+                        (< arr-dim (+ subarr-dim offset))))
+                  shape-vec
+                  offset-vec
+                  subarray-shape-vec))
+    (error "Cannot subarray out of bounds; consider using subarray/fill or subarray/wrap"))
   (define nested-vec-arr (array->nest-vector arr))
-  (define res-nested-vec (dimensional-slice nested-vec-arr offset-vec subarray-size-vec))
-  (rem-array subarray-size-vec (vector-flatten res-nested-vec)))
+  (define res-nested-vec (dimensional-subarray nested-vec-arr offset-vec subarray-shape-vec))
+  (rem-array subarray-shape-vec (vector-flatten res-nested-vec)))
 
+(module+ test
+  (check-equal? (remora (R_subarray (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                                    (array 0 1)
+                                    (array 2 2)))
+                (remora (array (array 1 2) (array 5 6))))
+  (check-equal? (remora (R_subarray (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                                    (array 1 2)
+                                    (array 3 2)))
+                (remora (array (array 6 7) (array 10 11) (array 14 15)))))
 
 ; same as subarray, but if the subarray goes out of bound of arr (on any side, through origin being
-; negative or shape + origin > size of arr), the rest is filled with scalar values fill
+; negative or shape + offset > size of arr), the rest is filled with scalar values fill
 ; returns an array of shape subarray-shape
-(define-primop (R_subarray/fill [arr all] [origin 1] [subarray-shape 1] [fill 0])
-  (define filled-new-arr (remora (R_reshape subarray-shape fill)))
-  (define old-arr-shape (remora (R_shape-of arr)))
-  (define max-of-2 (remora (fn ((a 0) (b 0)) (R_select (> a b) a b))))
-  (define min-of-2 (remora (fn ((a 0) (b 0)) (R_select (< a b) a b))))
-  (define old-arr-subarray-origin (remora (max-of-2 ((fn ((_ 0)) 0) subarray-shape) origin)))
-  (define old-arr-subarray-end (remora (sub1 (min-of-2 (+ subarray-shape origin) old-arr-shape))))
-  (define old-arr-subarray-origin-list (R_array->nest-list old-arr-subarray-origin))
-  (define old-arr-subarray-end-list (R_array->nest-list old-arr-subarray-end))
-  (define idx-ranges (remora (map (fn ((origin 0) (end 0)) (R_range origin (add1 end) 1))
-                                  old-arr-subarray-origin-list
-                                  old-arr-subarray-end-list)))
-  (define all-idx (remora (R_cartesian-product idx-ranges)))
-  ; there is prolly a better version of doing this, maybe using reduce, but good enough for now
-  (remora (R_foldr (fn ((idx 1) (new-arr all)) (R_array-set new-arr (- idx origin) (R_index arr idx)))
-                   filled-new-arr
-                   all-idx)))
-
+(define-primop (R_subarray/fill [arr all] [offset 1] [subarray-shape 1] [fill 0])
+  (define out-arr (remora (R_reshape subarray-shape fill)))
+  (define arr-shape-list (vector->list (rem-array-shape arr)))
+  (define offset-list (vector->list (rem-array-data offset)))
+  (define subarr-shape-list (vector->list (rem-array-data subarray-shape)))
+  (unless (eq? (length arr-shape-list) (length offset-list))
+    (error "Offset rank isn't equal to array rank"))
+  (unless (eq? (length arr-shape-list) (length subarr-shape-list))
+    (error "Subarray shape rank isn't equal to array rank"))
+  (define overlap-shape
+    (map (lambda (arr-dim offset subarr-dim)
+           (- (min arr-dim (+ subarr-dim offset))    ;; right end of overlap interval
+              (max 0 offset)))                       ;; left end of overlap interval
+         arr-shape-list
+         offset-list
+         subarr-shape-list))
+  (define pos-offset (list->array (map (lambda (i) (max i 0)) offset-list)))
+  (define neg-offset (list->array (map (lambda (i) (min i 0)) offset-list)))
+  (if (ormap (lambda (dim) (<= dim 0)) overlap-shape) ;; if there is no overlap, return init arr
+      out-arr
+      (remora (R_foldr (fn ((idx 1) (new-arr all))
+                            (R_array-set new-arr
+                                         (- idx neg-offset)   ;; shift to account for left overhang
+                                         (R_index arr (+ idx pos-offset))))
+                        out-arr
+                        (indicies-from-shape (list->vector overlap-shape))))))
 
 ; vectors-scalar is a scalar rem array with a list of index ranges inside
 (define (cart-product vectors-scalar)
