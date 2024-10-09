@@ -1284,7 +1284,7 @@
   (define nested-vec-arr (array->nest-vector arr))
   (define res-nested-vec (dimensional-subarray/fill
                           nested-vec-arr shape-vec
-                          offset-vec subarray-shape-vec fill))
+                          offset-vec subarray-shape-vec (rem-array-data fill)))
   (rem-array subarray-shape-vec (vector-flatten res-nested-vec)))
 (module+ test
   (check-equal? (remora (R_subarray/fill
