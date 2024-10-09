@@ -1286,7 +1286,6 @@
                           nested-vec-arr shape-vec
                           offset-vec subarray-shape-vec fill))
   (rem-array subarray-shape-vec (vector-flatten res-nested-vec)))
-
 (module+ test
   (check-equal? (remora (R_subarray/fill
                          (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
@@ -1318,6 +1317,71 @@
                                (array 413 0 1 413)
                                (array 413 2 3 413)
                                (array 413 413 413 413)))))
+
+; Helper for dimensional-subarray/wrap to construct a wrapped arr
+(define (helper-dim-sarr/wrap offset-arr-vec remaining-cell-count)
+  (define cur-dim (vector-length offset-arr-vec))
+  (cond [(<= remaining-cell-count cur-dim)
+         (vector-take offset-arr-vec remaining-cell-count)]
+        [else
+         (vector-append offset-arr-vec
+                        (helper-dim-sarr/wrap offset-arr-vec
+                                              (- remaining-cell-count cur-dim)))]))
+
+; Assumes that the length of shape vector is non-zero
+(define (dimensional-subarray/wrap offset-arr-nest-vec shape-vec)
+  (cond [(equal? 1 (vector-length shape-vec))
+         (helper-dim-sarr/wrap offset-arr-nest-vec (vector-ref shape-vec 0))]
+        [else
+         (vector-map (lambda (cell)
+                       (dimensional-subarray/wrap cell
+                                                  (vector-drop shape-vec 1)))
+                     (helper-dim-sarr/wrap offset-arr-nest-vec (vector-ref shape-vec 0)))]))
+
+
+; same as subarray, but assumes that arr tiles an infinite plane and thus allows indexing out of bounds
+; returns an array of shape subarray-shape
+(define-primop (R_subarray/wrap [arr all] [offset 1] [subarray-shape 1])
+  (define shape-vec (rem-array-shape arr))
+  (define offset-vec (rem-array-data offset))
+  (define subarray-shape-vec (rem-array-data subarray-shape))
+  (when (zero? (vector-length shape-vec))
+    (error "Cannot take a subarray of a scalar"))
+  (unless (eq? (vector-length shape-vec) (vector-length offset-vec))
+    (error "Offset length isn't equal to array rank"))
+  (unless (eq? (vector-length shape-vec) (vector-length subarray-shape-vec))
+    (error "Subarray shape length isn't equal to array rank"))
+  (define offset-arr (remora (R_rotate-n-dim arr offset)))
+  (define nested-vec-offset-arr (array->nest-vector offset-arr))
+  (define res-nested-vec (dimensional-subarray/wrap nested-vec-offset-arr subarray-shape-vec))
+  (rem-array subarray-shape-vec (vector-flatten res-nested-vec)))
+(module+ test
+  (check-equal? (remora (R_subarray/wrap
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array 0 1)
+                         (array 2 2)))
+                (remora (array (array 1 2)
+                               (array 5 6))))
+  (check-equal? (remora (R_subarray/wrap
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array -1 -2)
+                         (array 2 4)))
+                (remora (array (array 14 15 12 13)
+                               (array 2 3 0 1))))
+  (check-equal? (remora (R_subarray/wrap
+                         (alit (4 4) 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
+                         (array 3 2)
+                         (array 2 4)))
+                (remora (array (array 14 15 12 13)
+                               (array 2 3 0 1))))
+  (check-equal? (remora (R_subarray/wrap
+                         (alit (2 2) 0 1 2 3)
+                         (array -1 -1)
+                         (array 4 4)))
+                (remora (array (array 3 2 3 2)
+                               (array 1 0 1 0)
+                               (array 3 2 3 2)
+                               (array 1 0 1 0)))))
 
 ; vectors-scalar is a scalar rem array with a list of index ranges inside
 (define (cart-product vectors-scalar)
